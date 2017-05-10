@@ -7,7 +7,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bin": {
-    "ethers": "./bin/ethers-ens"
+    "ethers-ens": "./bin/ethers-ens"
   },
   "keywords": [
     "ethereum",
