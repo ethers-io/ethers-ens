@@ -1,0 +1,753 @@
+#!/usr/bin/env node
+
+/*
+"
+{\"address\":\"0x18C6045651826824FEBBD39d8560584078d1b247\",
+\"bidAmount\":\"30000000000000000\",
+\"masqueAmount\":\"10000000000000000\",
+\"name\":\"fireflies.eth\",
+\"salt\":\"0xc9f920f8cca0790511c2995996f80dab0f8f67336d9eb1be554a113654b1cb24\",
+\"timestamp\":1494006888489}"
+
+"{\"address\":\"0xf770358c6F29FAA38186E49c149C87968775B228\",
+\"bidAmount\":\"20000000000000000\",
+\"masqueAmount\":\"10000000000000000\",
+\"name\":\"ricmoose.eth\",
+\"salt\":\"0xa770059ab96c8810ad12ef3b27ebe9a37bb491e58c05845ca8aff6c234c4ff6d\",
+\"timestamp\":1493962460354}
+"
+*/
+
+'use strict';
+
+var fs = require('fs');
+
+var ethers = require('ethers');
+var readlineSync = require('readline-sync');
+
+var Registrar = require('../index');
+
+var getopts = require('ethers-cli/lib/utils').getopts;
+
+var version = require('../package.json').version;
+
+function getPassword(message) {
+    if (!message) { message = 'Account Password: '; }
+    var password = readlineSync.question(message, {hideEchoBack: true});
+    return ethers.utils.toUtf8Bytes(password.normalize('NFKC'));
+}
+
+function showHelp(error) {
+    console.log('');
+    console.log('Command Line Interface - ethers-ens/' + version);
+    console.log('');
+    console.log('Usage:');
+    console.log('');
+    console.log('    ethers-ens init FILENAME');
+    console.log('    ethers-ens info FILENAME [--check-password]');
+    console.log('');
+    console.log('    ethers-ens lookup NAME [ NAME ... ]');
+    //console.log('    ethers-ens scan-log');
+    console.log('    ethers-ens watch');
+    console.log('');
+    console.log('    ethers-ens start-auction NAME');
+    console.log('    ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]');
+    console.log('    ethers-ens reveal-bid NAME AMOUNT [--salt SALT | --secret SECRET]');
+    console.log('    ethers-ens finalize-auction NAME');
+    console.log('');
+    console.log('    ethers-ens set-resolver NAME [--resolver ADDRESS]');
+    console.log('    ethers-ens set-address NAME ADDRESS');
+    console.log('');
+    console.log('Options');
+    console.log('    --help             Show this help screen');
+    console.log('    --testnet          Use the ropsten test network');
+    console.log('    --account ACCOUNT  The JSON wallet to use');
+    console.log('    --check-password   Require the password to check JSON wallet');
+    console.log('    --extra            Send extra ether to mask the bid value');
+    console.log('    --salt             The salt to use (otherwise compute; recommended)');
+    console.log('    --secret           Use keccak256(secret) as the salt');
+    console.log('    --nolog            Do not log activity to ens-log.txt');
+    console.log('');
+
+    if (error) {
+        console.log('Error: ' + error.message);
+        console.log('');
+        process.exit(1);
+    }
+
+    process.exit(0);
+}
+
+var command = null;
+var registrar = null;
+
+try {
+    var opts = getopts({
+        account: '',
+        extra: '',
+        resolver: '',
+        salt: '',
+        secret: ''
+    }, {
+        'testnet': false,
+        'nolog': false,
+        'check-password': false,
+        'help': false,
+    });
+
+    if (opts.flags.help) { showHelp();  }
+
+    if (opts.args.length === 0) {
+        throw new Error('no command provided');
+    }
+
+    var command = opts.args.shift();
+
+    // Prepare a provider (possibly on testnet)
+    //var provider = new ethers.providers.EtherscanProvider(opts.flags.testnet);
+    var provider = new ethers.providers.InfuraProvider(opts.flags.testnet);
+    //var provider = ethers.providers.getDefaultProvider(opts.flags.testnet);
+    var providerOrSigner = provider;
+
+    // Read and decrpyt the wallet if an account is required
+    function requireAccount() {
+        if (!opts.options.account) { throw new Error(command + ' requires an account'); }
+
+        // Decrypt the account and attach the provider
+        var accountPromise = new Promise(function(resolve, reject) {
+            setTimeout(function() {
+                ethers.Wallet.fromEncryptedWallet(
+                    fs.readFileSync(opts.options.account),
+                    getPassword()
+                ).then(function(account) {
+                    account.provider = provider;
+                    resolve(account);
+                }, function(error) {
+                    reject(error);
+                });
+            }, 0);
+        });
+
+        // Custom signer to defer operations until the account is decrypted
+        providerOrSigner = {
+            getAddress: function() {
+                return accountPromise.then(function(account) {
+                    return account.address;
+                });
+            },
+            sendTransaction: function(transaction) {
+                return accountPromise.then(function(account) {
+                    return account.sendTransaction(transaction);
+                });
+            },
+            getSalt: function(tag) {
+                return accountPromise.then(function(account) {
+                    var salt = account.privateKey;
+                    salt = ethers.utils.keccak256(salt);
+                    salt = ethers.utils.concat([ethers.utils.toUtf8Bytes('salt'), salt]);
+                    salt = ethers.utils.keccak256(salt);
+                    salt = ethers.utils.concat([ethers.utils.toUtf8Bytes(tag), salt]);
+                    return ethers.utils.keccak256(salt);
+                });
+            },
+            provider: providerOrSigner,
+        };
+    }
+
+    // If a salt is allowed, make sure the salt is a valid 32 byte hexidecimal
+    // value or if secret is provided, compute the salt
+    function allowSalt() {
+        if (opts.options.salt) {
+            if (opts.options.secret) {
+                throw new Error('may only specify one of --salt or --secret');
+            }
+            if (!opts.options.salt.match(/^0x[0-9A-Fa-f]{64}$/)) {
+                throw new Error('invalid salt');
+            }
+        } else if (opts.options.secret) {
+            opts.options.salt = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(opts.options.secret));
+        }
+    }
+
+    function ensureArgs(count, message) {
+        if (opts.args.length !== count) {
+            throw new Error(message);
+        }
+    }
+
+    function parseEther(argument, message) {
+        try {
+            if (typeof(argument) === 'number') {
+                opts.args[argument] = ethers.utils.parseEther(opts.args[argument]);
+            } else {
+                opts.options[argument] = ethers.utils.parseEther(opts.options[argument]);
+            }
+        } catch (error) {
+            throw new Error(message);
+        }
+    }
+
+    // Check command line options are valid
+    switch (command) {
+        case 'init':
+            ensureArgs(1, 'must specify a JSON wallet');
+            break;
+
+        case 'info':
+            ensureArgs(1, 'must specify a JSON wallet');
+            if (opts.flags['check-password']) {
+                opts.options.account = opts.args[0];
+                requireAccount();
+            }
+            break;
+
+        case 'lookup':
+            if (opts.args.length === 0) {
+                throw new Error('`lookup` requires NAME [ NAME ... ]');
+            }
+            break;
+
+        case 'scan-log':
+            break;
+
+        case 'watch':
+            break;
+
+        case 'start-auction':
+            ensureArgs(1, '`start-auction` requires NAME');
+            requireAccount();
+            break;
+
+        case 'bid':
+            ensureArgs(2, '`bid` requires NAME and AMOUNT');
+            parseEther(1, 'invalid bid AMOUNT')
+            if (opts.options.extra) {
+                parseEther('extra', 'invalid extra AMOUNT')
+            }
+            allowSalt();
+            requireAccount();
+            break
+
+        case 'reveal-bid':
+            ensureArgs(2, '`reveal-bid` requires NAME and AMOUNT');
+            parseEther(1, 'invalid bid AMOUNT');
+            allowSalt();
+            requireAccount();
+            break;
+
+        case 'finalize-auction':
+            ensureArgs(1, '`finalize-auction` requires NAME');
+            requireAccount();
+            break;
+
+        case 'set-resolver':
+            ensureArgs(1, '`set-resolver` requires NAME');
+            if (!opts.options.resolver) {
+                opts.options.resolver = Registrar.config[provider.testnet ? 'testnet': 'mainnet'].publicResolver;
+            }
+            requireAccount();
+            break;
+
+        case 'set-address':
+            ensureArgs(2, '`set-address` requires NAME and ADDRESS');
+            requireAccount();
+            break;
+
+        default:
+            throw new Error('unknown command - ' + command);
+    }
+
+    // If there was an account required, the providerOrSigner has entangled it in,
+    // the above switch/case statement, so we can now bind it to the registrar
+    registrar = new Registrar(providerOrSigner);
+
+    // Make sure people know who they are talking to
+    console.log('Network: ' + (registrar.provider.testnet ? "testnet": "mainnet"));
+
+} catch (error) {
+    showHelp(error);
+}
+
+// 20 spaces
+var Space = '                    ';
+function addLog(action, info) {
+    if (opts.flags.nolog) { return; }
+
+    info.network = (registrar.provider.testnet ? "testnet": "mainnet");
+
+    // Prepare the log (action and date)
+    var log = action + ' - ' + getDate(new Date()) + '\n';
+
+    // Add each sorted key
+    var keys = Object.keys(info);
+    keys.sort();
+    keys.forEach(function(key) {
+        log += '  ' + key + ':' + Space.substring(key.length) + info[key] + '\n';
+    });
+
+    // Append it to the log
+    fs.appendFileSync('ens-log.txt', log);
+}
+
+
+function zeroPad(value, length) {
+    value = String(value);
+    while (value.length < length) { value = '0' + value; }
+    return value;
+}
+
+// Return YYYY-mm-dd HH:MM:SS
+function getDate(date) {
+    return (
+        date.getFullYear() + '-' +
+        zeroPad(date.getMonth() + 1, 2) + '-' +
+        zeroPad(date.getDate(), 2) + ' ' +
+        zeroPad(date.getHours(), 2) + ':' +
+        zeroPad(date.getMinutes(), 2) + ':' +
+        zeroPad(date.getSeconds(), 2)
+    )
+}
+
+// Return the delta time between now and the timestamp
+function getTimer(timestamp) {
+    var dt = (timestamp.getTime() - (new Date()).getTime()) / 1000;
+    var negative = false;
+    if (dt < 0) {
+        negative = true;
+        dt *= -1;
+    }
+
+    if (dt === 0) { return '0'; }
+
+    var result = [];
+    [60, 60, 24, 365, 1000].forEach(function(chunk) {
+        var amount = dt;
+        if (amount === 0) { return; }
+
+        var amount = zeroPad(parseInt(amount % chunk), 2);
+        dt = parseInt(dt / chunk);
+        result.unshift(amount);
+    })
+
+    result = result.join(":");
+
+    // Trim leading zeros
+    while (result.length > 1 && result.match(/^[0:].+/)) {
+        result = result.substring(1);
+    }
+
+    if (negative) { result = '-' + result; }
+
+    return result;
+}
+
+// Make a readable human date with a timer
+function getHumanDate(timestamp) {
+    var timer = getTimer(timestamp);
+    if (timer.substring(0, 1) === '-') {
+        timer = ' (' + timer.substring(1) + ' ago)';
+    } else {
+        timer = ' (in ' + timer + ')';
+    }
+    return getDate(timestamp) + timer;
+}
+
+// Fetch all info about a name we could care about
+function getNameInfo(name) {
+    return Promise.all([
+        registrar.getAuction(name),
+        registrar.getAuctionStartDate(name),
+        registrar.getResolver(name),
+        registrar.getOwner(name),
+        registrar.getAddress(name)
+    ]).then(function(result) {
+        var nameInfo = result[0];
+        nameInfo.startDate = result[1];
+        nameInfo.resolver = result[2];
+        nameInfo.owner = result[3];
+        nameInfo.addr = result[4];
+        nameInfo.name = name;
+        if (nameInfo.winningDeed !== '0x0000000000000000000000000000000000000000') {
+            return registrar.getDeedOwner(nameInfo.winningDeed).then(function(owner) {
+                nameInfo.winningBidder = owner;
+                return nameInfo;
+            });
+        }
+        return nameInfo;
+    })
+}
+
+function loadLog() {
+    var data = fs.readFileSync('ens-log.txt').toString();
+
+    var entries = [];
+
+    function addEntry(all, command, date, optionsData) {
+        var options = { command: command, date: date };
+        entries.push(options);
+
+        function addOption(all, key, value) {
+            options[key] = value;
+        }
+        optionsData.replace(/  ([a-zA-Z]*): *(.*)\n /g, addOption);
+        return all;
+    }
+    data.replace(/([a-zA-Z]+) - ([0-9: -]*)\n((?:  .*\n)*)/g, addEntry);
+
+    return entries;
+}
+
+switch (command) {
+    case 'init':
+        (function() {
+            var filename = opts.args.shift();
+            if (fs.existsSync(filename)) {
+                console.log('Filename already exists; cannot overwrite');
+                process.exit(1);
+            }
+            console.log('Initializing a new JSON wallet - ' + filename);
+            console.log('Keep this password and file SAFE!! If lost or forgotten');
+            console.log('it CANNOT be recovered, by ANYone, EVER.');
+
+            var password = getPassword();
+            var confirmPassword = getPassword('Confirm Password: ')
+            if (ethers.utils.hexlify(password) != ethers.utils.hexlify(confirmPassword)) {
+                console.log('Passwords did not match.');
+                process.exit(1);
+            }
+
+            var wallet = ethers.Wallet.createRandom();
+            wallet.encrypt(password).then(function(json) {
+
+                // Add nice spacing to the JSON
+                json = JSON.stringify(JSON.parse(json), undefined, 4);
+
+                try {
+                    fs.writeFileSync(filename, json, { flag: 'wx' });
+                    console.log('New account address: ' + wallet.address);
+                } catch (error) {
+                    if (error.code === 'EEXIST') {
+                        console.log('Filename already exists; cannot overwrite');
+                    } else {
+                        console.log('Unknown Error: ' + error.message);
+                    }
+                }
+            });
+        })();
+        break;
+
+    case 'info':
+        (function() {
+            var filename = opts.args.shift();
+            if (!fs.existsSync(filename)) {
+                console.log('Filename not found.');
+                process.exit(1);
+            }
+            var json = fs.readFileSync(filename);
+            if (opts.flags['check-password']) {
+                providerOrSigner.getAddress().then(function(address) {
+                    console.log('Password OK!');
+                    console.log('Address: 0x' + address);
+                    registrar.provider.getBalance(address).then(function(balance) {
+                        console.log('Balance: ' + ethers.utils.formatEther(balance));
+                    });
+                });
+            } else {
+                var address = JSON.parse(json).address;
+                console.log('Address: 0x' + address);
+                providerOrSigner.getBalance(address).then(function(balance) {
+                    console.log('Balance: ' + ethers.utils.formatEther(balance));
+                });
+            }
+        })();
+        break;
+
+    // Lookup one of more domains
+    case 'lookup':
+        (function() {
+            var namePromises = [];
+            opts.args.forEach(function(name) {
+                namePromises.push(getNameInfo(name));
+            });
+
+            Promise.all(namePromises).then(function(results) {
+                results.forEach(function(result) {
+                    console.log(result.name);
+                    console.log('  State:                ' + result.state);
+                    console.log('  Available Start Date: ' + getHumanDate(result.startDate));
+                    if (result.state == 'auction' || result.state == 'reveal' || result.state == '') {
+                        console.log('  Auction Reveal Date:  ' + getHumanDate(result.revealDate));
+                        console.log('  Auction End Date:     ' + getHumanDate(result.endDate));
+                    }
+                    if (result.state == 'reveal' || result.state == 'owned') {
+                        console.log('  Winning Deed:         ' + result.winningDeed);
+                        console.log('  Winning Bidder:       ' + result.winningBidder);
+                        console.log('  Value:                ' + ethers.utils.formatEther(result.value));
+                        console.log('  Highest Bid:          ' + ethers.utils.formatEther(result.highestBid));
+                    }
+                    if (result.state == 'owned') {
+                        console.log('  Owner:                ' + result.owner);
+                        console.log('  Resolver:             ' + result.resolver);
+                        console.log('  Address:              ' + result.addr);
+                    }
+                });
+            });
+        })();
+        break;
+
+    /*
+    // Coming Soon!
+    // Scan the log and report any warnings
+    //   - startAuction, but no bids
+    //   - placeBid, but no revealBid
+    //   - placeBid and won, but no finalizeAuction
+    case 'scan-log':
+        (function() {
+            //console.log(data, entries);
+            loadLog().forEach(
+        })();
+        break;
+    */
+
+    case 'watch':
+        (function() {
+            var Status = [
+                'Low bid or placed after reveal began (returned 99.5%)',
+                'Late Reveal (return 0.5%)',
+                'New Winner',
+                'Low Bid, but second place (return 99.5%)',
+                'Low bid (return 99.5%)',
+            ];
+            registrar.on('BidRevealed', function(labelHash, owner, value, status) {
+                console.log('BidRevealed');
+                console.log('  Label Hash: ' + labelHash);
+                console.log('  Owner:      ' + owner);
+                console.log('  Value:      ' + ethers.utils.formatEther(value));
+                console.log('  Status:     ' + Status[status]);
+            });
+
+            registrar.on('NewBid', function(sealedBid, bidder, deposit) {
+                console.log('NewBid');
+                console.log('  Sealed Bid: ' + sealedBid);
+                console.log('  Bidder:     ' + bidder);
+                console.log('  Deposit:    ' + ethers.utils.formatEther(deposit));
+            });
+
+            registrar.on('AuctionStarted', function(labelHash, registrationDate) {
+                console.log('AuctionStarted');
+                console.log('  Label Hash:         ' + labelHash);
+                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
+            });
+
+            registrar.on('HashRegistered', function(labelHash, owner, value, registrationDate) {
+                console.log('HashRegistered');
+                console.log('  Label Hash:         ' + labelHash);
+                console.log('  Owner:              ' + owner);
+                console.log('  Value:              ' + ether.utils.formatEther(value));
+                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
+            });
+
+            registrar.on('HashReleased', function(labelHash, value) {
+                console.log('HashReleased');
+                console.log('  Label Hash:         ' + labelHash);
+                console.log('  Value:              ' + ether.utils.formatEther(value));
+            });
+
+            registrar.on('HashInvalidated', function(labelHash, name, value, registrationDate) {
+                console.log('HashRegistered');
+                console.log('  Label Hash:         ' + labelHash);
+                console.log('  Name:               ' + name);
+                console.log('  Value:              ' + ether.utils.formatEther(value));
+                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
+            });
+
+            registrar.provider.getBlockNumber().then(function(blockNumber) {
+                registrar.provider.resetEventsBlock(blockNumber - 20);
+            });
+
+        })();
+        break;
+
+    case 'start-auction':
+        (function() {
+            var name = opts.args.shift();
+            getNameInfo(name).then(function(result) {
+                var errors = {
+                    'auction': 'name already up for auction; please `bid` before ' + getHumanDate(result.revealDate),
+                    'owned': 'name already owned',
+                    'forbidden': 'name forbidden',
+                    'reveal': 'bidding closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
+                };
+                if (errors[result.state]) {
+                    console.log('  Error: ' + errors[result.state]);
+                } else {
+                    registrar.startAuction(name).then(function(result) {
+                        addLog('startAuction', {
+                            address: result.from,
+                            name: name,
+                            labelHash: result.labelHash,
+                            transactionHash: result.hash
+                        });
+                        console.log('  Label Hash:           ' + result.labelHash);
+                        console.log('  Transaction Hash:     ' + result.hash);
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'bid':
+        (function() {
+            var name = opts.args.shift();
+            var bidAmount = opts.args.shift();
+            var salt = opts.options.salt;
+            var extraAmount = (opts.options.extra || ethers.utils.bigNumberify(0));
+            getNameInfo(name).then(function(result) {
+                var errors = {
+                    'open': 'name not up for auction yet; please `start` first',
+                    'owned': 'name already owned',
+                    'forbidden': 'name forbidden',
+                    'reveal': 'bidding closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
+                };
+
+                if (errors[result.state]) {
+                    console.log('  Error: ' + errors[result.state]);
+                } else {
+                    registrar.placeBid(name, bidAmount, salt, extraAmount).then(function(result) {
+                        addLog('placeBid', {
+                            address: result.from,
+                            bidAmount: ethers.utils.formatEther(bidAmount),
+                            extraAmount: ethers.utils.formatEther(extraAmount),
+                            name: name,
+                            labelHash: result.labelHash,
+                            salt: result.salt,
+                            sealedBid: result.sealedBid,
+                            transactionHash: result.hash
+                        });
+                        console.log('  Label Hash            ' + result.labelHash);
+                        console.log('  Salt:                 ' + result.salt);
+                        console.log('  Sealed Bid:           ' + result.sealedBid);
+                        console.log('  Transaction Hash:     ' + result.hash);
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'reveal-bid':
+        (function() {
+            var name = opts.args.shift();
+            var bidAmount = opts.args.shift();
+            var salt = opts.flags.salt;
+            getNameInfo(name).then(function(result) {
+                var errors = {
+                    'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
+                    'open': 'name not up for auction yet; please `start` first',
+                    'owned': 'name already owned',
+                    'forbidden': 'name forbidden',
+                    'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
+                };
+
+                if (errors[result.state]) {
+                    console.log('  Error: ' + errors[result.state]);
+                } else {
+                    registrar.revealBid(name, bidAmount, salt).then(function(result) {
+                        addLog('revealBid', {
+                            address: result.from,
+                            bidAmount: ethers.utils.formatEther(bidAmount),
+                            labelHash: result.labelHash,
+                            name: name,
+                            salt: result.salt,
+                            sealedBid: result.sealedBid,
+                            transactionHash: result.hash
+                        });
+                        console.log('  Label Hash            ' + result.labelHash);
+                        console.log('  Salt:                 ' + result.salt);
+                        console.log('  Sealed Bid:           ' + result.sealedBid);
+                        console.log('  Transaction Hash:     ' + result.hash);
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'finalize-auction':
+        (function() {
+            var name = opts.args.shift();
+            getNameInfo(name).then(function(result) {
+                var errors = {
+                    'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
+                    'open': 'name not up for auction yet; please `start` first',
+                    'forbidden': 'name forbidden',
+                    'reveal': 'auction closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
+                };
+
+                if (errors[result.state]) {
+                    console.log('  Error: ' + errors[result.state]);
+                } else if (result.state === 'owned' && result.owner != '0x0000000000000000000000000000000000000000') {
+                    console.log('  Error: auction has already been finalized');
+                } else {
+                    registrar.finalizeAuction(name).then(function(result) {
+                        addLog('finalizeAuction', {
+                            address: result.from,
+                            name: name,
+                            labelHash: result.labelHash,
+                            transactionHash: result.hash
+                        });
+                        console.log('  Label Hash:           ' + result.labelHash);
+                        console.log('  Transaction Hash:     ' + result.hash);
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'set-resolver':
+        (function() {
+            var name = opts.args.shift();
+            var resolver = opts.options.resolver;
+            Promise.all([
+                getNameInfo(name),
+                registrar.signer.getAddress()
+            ]).then(function(result) {
+                if (result[0].owner !== result[1]) {
+                    console.log('  Error: account does not own name');
+                } else {
+                    registrar.setResolver(name, resolver).then(function(result) {
+                        addLog('setResolver', {
+                            address: result.from,
+                            name: name,
+                            nodeHash: result.nodeHash,
+                            resolver: resolver,
+                            transactionHash: result.hash
+                        });
+                        console.log('  Node Hash:            ' + result.nodeHash);
+                        console.log('  Transaction Hash:     ' + result.hash);
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'set-address':
+        (function() {
+            var name = opts.args.shift();
+            var address = opts.args.shift();
+            registrar.setAddress(name, address).then(function(result) {
+                addLog('setAddress', {
+                    address: result.from,
+                    addr: result.addr,
+                    name: name,
+                    nodeHash: result.nodeHash,
+                    resolver: result.resolver,
+                    transactionHash: result.hash,
+                });
+                console.log('  Node Hash:            ' + result.nodeHash);
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+}
