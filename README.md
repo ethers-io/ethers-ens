@@ -14,6 +14,14 @@ Try this out on **testnet** first, until you are comfortable using the tool and 
 confident you won't forget to reveal.
 
 
+Installing
+----------
+
+```
+/Users/ethers> sudo npm install -g ethers-ens
+```
+
+
 Command-Line Interface
 ----------------------
 
