@@ -309,7 +309,9 @@ More (and better) documentation.
 
 Testing!
 
-More concise gasLimits (so if there is a throw, less is at stake)
+More concise gasLimits (so if there is a throw, less is at stake).
+
+Dist files for the browser (and a demo ethers.io app).
 
 Donations
 ---------
