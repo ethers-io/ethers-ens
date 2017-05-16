@@ -44,6 +44,7 @@ function showHelp(error) {
     console.log('');
     console.log('Options');
     console.log('    --help             Show this help screen');
+    console.log('    --rpc NODE         Use the JSON-RPC node');
     console.log('    --testnet          Use the ropsten test network');
     console.log('    --account ACCOUNT  The JSON wallet to use');
     console.log('    --check-password   Require the password to check JSON wallet');
@@ -70,6 +71,7 @@ try {
         account: '',
         extra: '',
         resolver: '',
+        rpc: '',
         salt: '',
         secret: ''
     }, {
@@ -88,10 +90,13 @@ try {
     var command = opts.args.shift();
 
     // Prepare a provider (possibly on testnet)
-    //var provider = new ethers.providers.EtherscanProvider(opts.flags.testnet);
-    //var provider = new ethers.providers.InfuraProvider(opts.flags.testnet);
-    var provider = ethers.providers.getDefaultProvider(opts.flags.testnet);
-    //var provider = new ethers.providers.JsonRpcProvider('http://localhost:8546', opts.flags.testnet);
+    if (opts.options.rpc) {
+        var provider = new ethers.providers.JsonRpcProvider(opts.options.rpc, opts.flags.testnet);
+    } else {
+        //var provider = new ethers.providers.EtherscanProvider(opts.flags.testnet);
+        //var provider = new ethers.providers.InfuraProvider(opts.flags.testnet);
+        var provider = ethers.providers.getDefaultProvider(opts.flags.testnet);
+    }
     var providerOrSigner = provider;
 
     // Read and decrpyt the wallet if an account is required
