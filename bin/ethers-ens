@@ -1,23 +1,5 @@
 #!/usr/bin/env node
 
-/*
-"
-{\"address\":\"0x18C6045651826824FEBBD39d8560584078d1b247\",
-\"bidAmount\":\"30000000000000000\",
-\"masqueAmount\":\"10000000000000000\",
-\"name\":\"fireflies.eth\",
-\"salt\":\"0xc9f920f8cca0790511c2995996f80dab0f8f67336d9eb1be554a113654b1cb24\",
-\"timestamp\":1494006888489}"
-
-"{\"address\":\"0xf770358c6F29FAA38186E49c149C87968775B228\",
-\"bidAmount\":\"20000000000000000\",
-\"masqueAmount\":\"10000000000000000\",
-\"name\":\"ricmoose.eth\",
-\"salt\":\"0xa770059ab96c8810ad12ef3b27ebe9a37bb491e58c05845ca8aff6c234c4ff6d\",
-\"timestamp\":1493962460354}
-"
-*/
-
 'use strict';
 
 var fs = require('fs');
@@ -47,8 +29,10 @@ function showHelp(error) {
     console.log('    ethers-ens info FILENAME [--check-password]');
     console.log('');
     console.log('    ethers-ens lookup NAME [ NAME ... ]');
-    //console.log('    ethers-ens scan-log');
-    console.log('    ethers-ens watch');
+    console.log('    ethers-ens scan-log');
+    //console.log('    ethers-ens check-bid SEALED_BID');
+    console.log('    ethers-ens watch NAME');
+    console.log('    ethers-ens ignore NAME');
     console.log('');
     console.log('    ethers-ens start-auction NAME');
     console.log('    ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]');
@@ -105,8 +89,9 @@ try {
 
     // Prepare a provider (possibly on testnet)
     //var provider = new ethers.providers.EtherscanProvider(opts.flags.testnet);
-    var provider = new ethers.providers.InfuraProvider(opts.flags.testnet);
-    //var provider = ethers.providers.getDefaultProvider(opts.flags.testnet);
+    //var provider = new ethers.providers.InfuraProvider(opts.flags.testnet);
+    var provider = ethers.providers.getDefaultProvider(opts.flags.testnet);
+    //var provider = new ethers.providers.JsonRpcProvider('http://localhost:8546', opts.flags.testnet);
     var providerOrSigner = provider;
 
     // Read and decrpyt the wallet if an account is required
@@ -203,7 +188,7 @@ try {
 
         case 'lookup':
             if (opts.args.length === 0) {
-                throw new Error('`lookup` requires NAME [ NAME ... ]');
+                throw new Error('"lookup" requires NAME [ NAME ... ]');
             }
             break;
 
@@ -211,15 +196,20 @@ try {
             break;
 
         case 'watch':
+            ensureArgs(1, '"watch" requires NAME');
+            break;
+
+        case 'ignore':
+            ensureArgs(1, '"ignore" requires NAME');
             break;
 
         case 'start-auction':
-            ensureArgs(1, '`start-auction` requires NAME');
+            ensureArgs(1, '"start-auction" requires NAME');
             requireAccount();
             break;
 
         case 'bid':
-            ensureArgs(2, '`bid` requires NAME and AMOUNT');
+            ensureArgs(2, '"bid" requires NAME and AMOUNT');
             parseEther(1, 'invalid bid AMOUNT')
             if (opts.options.extra) {
                 parseEther('extra', 'invalid extra AMOUNT')
@@ -229,19 +219,19 @@ try {
             break
 
         case 'reveal-bid':
-            ensureArgs(2, '`reveal-bid` requires NAME and AMOUNT');
+            ensureArgs(2, '"reveal-bid" requires NAME and AMOUNT');
             parseEther(1, 'invalid bid AMOUNT');
             allowSalt();
             requireAccount();
             break;
 
         case 'finalize-auction':
-            ensureArgs(1, '`finalize-auction` requires NAME');
+            ensureArgs(1, '"finalize-auction" requires NAME');
             requireAccount();
             break;
 
         case 'set-resolver':
-            ensureArgs(1, '`set-resolver` requires NAME');
+            ensureArgs(1, '"set-resolver" requires NAME');
             if (!opts.options.resolver) {
                 opts.options.resolver = Registrar.config[provider.testnet ? 'testnet': 'mainnet'].publicResolver;
             }
@@ -249,7 +239,7 @@ try {
             break;
 
         case 'set-address':
-            ensureArgs(2, '`set-address` requires NAME and ADDRESS');
+            ensureArgs(2, '"set-address" requires NAME and ADDRESS');
             requireAccount();
             break;
 
@@ -270,6 +260,8 @@ try {
 
 // 20 spaces
 var Space = '                    ';
+var Space30 = '                              ';
+var Space40 = '                                        ';
 function addLog(action, info) {
     if (opts.flags.nolog) { return; }
 
@@ -377,25 +369,80 @@ function getNameInfo(name) {
     })
 }
 
+function dumpNameInfo(result) {
+    console.log('  State:                ' + result.state);
+    console.log('  Available Start Date: ' + getHumanDate(result.startDate));
+    if (result.state == 'auction' || result.state == 'reveal' || result.state == '') {
+        console.log('  Auction Reveal Date:  ' + getHumanDate(result.revealDate));
+        console.log('  Auction End Date:     ' + getHumanDate(result.endDate));
+    }
+    if (result.state == 'reveal' || result.state == 'owned') {
+        console.log('  Winning Deed:         ' + result.winningDeed);
+        console.log('  Winning Bidder:       ' + result.winningBidder);
+        console.log('  Value:                ' + ethers.utils.formatEther(result.value));
+        console.log('  Highest Bid:          ' + ethers.utils.formatEther(result.highestBid));
+    }
+    if (result.state == 'owned') {
+        console.log('  Owner:                ' + result.owner);
+        console.log('  Resolver:             ' + result.resolver);
+        console.log('  Address:              ' + result.addr);
+    }
+}
+
 function loadLog() {
+    var network = provider.testnet ? 'testnet': 'mainnet';
+
     var data = fs.readFileSync('ens-log.txt').toString();
 
-    var entries = [];
-
-    function addEntry(all, command, date, optionsData) {
-        var options = { command: command, date: date };
-        entries.push(options);
-
-        function addOption(all, key, value) {
-            options[key] = value;
+    var entries = [], entry = {};
+    data.split('\n').forEach(function(line) {
+        if (line.substring(0, 1) === '#') { return; }
+        if (line.substring(0, 2) === '  ') {
+            var comps = line.split(/:/);
+            entry[comps[0].trim()] = comps[1].trim();
+        } else if (line.indexOf(' - ') >= 0) {
+            entry = {};
+            var comps = line.split(' - ');
+            entry.command = comps[0];
+            entry.date = comps[1];
+            entries.push(entry);
         }
-        optionsData.replace(/  ([a-zA-Z]*): *(.*)\n /g, addOption);
-        return all;
-    }
-    data.replace(/([a-zA-Z]+) - ([0-9: -]*)\n((?:  .*\n)*)/g, addEntry);
+    });
 
-    return entries;
+    // Check chonologically for ignore/watch commands for the most recent stste
+    var ignore = {};
+    entries.forEach(function(entry) {
+        if (entry.command === 'ignore') {
+            ignore[entry.name] = true;
+        } else if (entry.command === 'watch') {
+            ignore[entry.name] = false;
+        }
+    });
+
+    // Filter out entries we don't care about
+    var filtered = [];
+    entries.forEach(function(entry) {
+        if (entry.network !== network) { return; }
+        if (entry.command === 'ignore') { return; }
+        if (ignore[entry.name]) { return; }
+        filtered.push(entry);
+    });
+
+    return filtered;
 }
+
+function getMaxBid(auction) {
+    var maxBidAmount = ethers.utils.bigNumberify(0);
+    auction.operations.forEach(function(operation) {
+        if (operation.command !== 'placeBid') { return; }
+        var bidAmount = ethers.utils.parseEther(operation.bidAmount);
+        if (bidAmount.gte(maxBidAmount)) {
+            maxBidAmount = bidAmount;
+        }
+    });
+    return ethers.utils.formatEther(maxBidAmount);
+}
+var ZeroAddress = '0x0000000000000000000000000000000000000000';
 
 switch (command) {
     case 'init':
@@ -473,29 +520,12 @@ switch (command) {
             Promise.all(namePromises).then(function(results) {
                 results.forEach(function(result) {
                     console.log(result.name);
-                    console.log('  State:                ' + result.state);
-                    console.log('  Available Start Date: ' + getHumanDate(result.startDate));
-                    if (result.state == 'auction' || result.state == 'reveal' || result.state == '') {
-                        console.log('  Auction Reveal Date:  ' + getHumanDate(result.revealDate));
-                        console.log('  Auction End Date:     ' + getHumanDate(result.endDate));
-                    }
-                    if (result.state == 'reveal' || result.state == 'owned') {
-                        console.log('  Winning Deed:         ' + result.winningDeed);
-                        console.log('  Winning Bidder:       ' + result.winningBidder);
-                        console.log('  Value:                ' + ethers.utils.formatEther(result.value));
-                        console.log('  Highest Bid:          ' + ethers.utils.formatEther(result.highestBid));
-                    }
-                    if (result.state == 'owned') {
-                        console.log('  Owner:                ' + result.owner);
-                        console.log('  Resolver:             ' + result.resolver);
-                        console.log('  Address:              ' + result.addr);
-                    }
+                    dumpNameInfo(result);
                 });
             });
         })();
         break;
 
-    /*
     // Coming Soon!
     // Scan the log and report any warnings
     //   - startAuction, but no bids
@@ -503,13 +533,251 @@ switch (command) {
     //   - placeBid and won, but no finalizeAuction
     case 'scan-log':
         (function() {
-            //console.log(data, entries);
-            loadLog().forEach(
+
+            var entries = loadLog();
+            var names = {};
+            entries.forEach(function(entry) {
+                if (entry.name) {
+                    if (!names[entry.name]) {
+                        names[entry.name] = { operations: [], name: entry.name};
+                    }
+                    names[entry.name].operations.push(entry);
+                 }
+            });
+
+            function getDeeds(auction) {
+                var promises = [];
+                auction.operations.forEach(function(operation) {
+                    if (operation.command !== 'placeBid') { return; }
+                    var promise = registrar.getDeedAddress(operation.address, operation.sealedBid);
+                    promise = promise.then(function(deed) {
+                        return {
+                            address: deed,
+                            bidAmount: operation.bidAmount,
+                            sealedBid: operation.sealedBid
+                        }
+                    });
+                    promises.push(promise);
+                });
+
+                return Promise.all(promises);
+                /*.then(function(deeds) {
+                    var unique = { };
+                    deeds.forEach(function(deed) { unique[deed] = true; });
+                    return Object.keys(unique);
+                });
+                */
+            }
+
+            var auctionPromises = [];
+            var warningPromises = [];
+
+            Object.keys(names).forEach(function(name) {
+                var auction = names[name];
+                var auctionPromise = registrar.getAuction(auction.name).then(function(result) {
+
+                    var ret = {
+                        date: result.endDate,
+                        endDate: result.endDate,
+                        name: auction.name,
+                        state: result.state,
+                        value: ethers.utils.formatEther(result.value),
+                        winningBidAmount: ethers.utils.formatEther(result.highestBid),
+                    };
+
+                    if (result.state === 'open' || result.state === 'not-yet-available') {
+                        // The interesting date is the auction start date; look it up
+                        ret = Promise.resolve(ret).then(function(ret) {
+                            return registrar.getAuctionStartDate(auction.name).then(function(startDate) {
+                                ret.date = startDate;
+                                return ret;
+                            });
+                        });
+                    }
+
+                    if (result.state === 'owned') {
+                        ret = Promise.resolve(ret).then(function(ret) {
+                            return Promise.all([
+                                registrar.getOwner(auction.name),
+                                registrar.getDeedOwner(result.winningDeed)
+                            ]).then(function(result) {
+                                ret.winning = false;
+                                auction.operations.forEach(function(operation) {
+                                    if (operation.address === result[0] || operation.address === result[1]) {
+                                        ret.winning = true;
+                                        ret.bidAmount = ret.winningBidAmount;
+                                    }
+                                });
+                                if (!ret.winning) {
+                                    ret.bidAmount = getMaxBid(auction);
+                                }
+                                return ret;
+                            });
+                        });
+                    }
+
+                    // Make sure our placeBids have deeds
+                    if (result.state === 'auction') {
+                        // The interesting date is when the bidding end date
+                        ret.date = result.revealDate;
+
+                        ret.bidAmount = getMaxBid(auction);
+
+                        // If a bid doesn't have a deed, the bid failed!
+                        warningPromises.push(
+                            getDeeds(auction).then(function(deeds) {
+                                var warnings = [];
+                                deeds.forEach(function(deed) {
+                                    if (deed.address != ZeroAddress) { return; }
+                                    warnings.push('placeBid(' + auction.name + ', ' + deed.bidAmount + ') is missing on the blockchain');
+                                });
+                                return warnings;
+                            })
+                        );
+                    }
+
+                    if (result.state === 'reveal') {
+
+                        // Let's find out if we're winning
+                        if (result.winningDeed != ZeroAddress) {
+                            ret = Promise.resolve(ret).then(function(ret) {
+                                return registrar.getDeedOwner(result.winningDeed).then(function(deed) {
+                                    ret.winning = false;
+                                    auction.operations.forEach(function(operation) {
+                                        if (operation.address === deed) {
+                                            ret.winning = true;
+                                            ret.bidAmount = operation.bidAmount;
+                                        }
+                                    });
+                                    if (!ret.winning) {
+                                        ret.bidAmount = getMaxBid(auction);
+                                    }
+                                    return ret;
+                                });
+                            });
+                        } else {
+                            ret.bidAmount = getMaxBid(auction);
+                        }
+
+                        // If there are any non-zero-address deeds, the bid has not been revealed!
+                        warningPromises.push(
+                            getDeeds(auction).then(function(deeds) {
+                                var warnings = [];
+                                deeds.forEach(function(deed) {
+                                    if (deed.address === ZeroAddress) { return; }
+                                    warnings.push('revealBid(' + auction.name + ', ' + deed.bidAmount + ') has not been called');
+                                });
+                                return warnings;
+                            })
+                        );
+                    }
+
+                    return ret;
+                });
+                auctionPromises.push(auctionPromise);
+            });
+
+            Promise.all(auctionPromises).then(function(result) {
+
+                function compareString(a, b) {
+                    if (a < b) { return -1; }
+                    if (a > b) { return 1; }
+                    return 0;
+                }
+                result.sort(function(a, b) {
+                    if (a.state === 'not-yet-available') {
+                        if (b.state === 'open') { return -1; }
+                        if (a.state === b.state) { return (a.date.getTime() - b.date.getTime()); }
+                    } else if (a.state === 'open') {
+                        if (b.state === 'not-yet-available') { return 1; }
+                        if (a.state === b.state) { return (a.date.getTime() - b.date.getTime()); }
+                    }
+                    return a.endDate.getTime() - b.endDate.getTime();
+                });
+
+                var lastState = null;
+                result.forEach(function(result) {
+                    if (result.state !== lastState) {
+                        console.log(result.state);
+                        lastState = result.state;
+                    }
+                    var dateInfo = getHumanDate(result.date);
+
+                    var bidInfo = (result.winning ? ' * ': '   ');
+                    if (result.state === 'auction' && result.bidAmount !== '0.0') {
+                        bidInfo += result.bidAmount;
+                    } else if (result.state === 'reveal' || result.state === 'owned') {
+                        if (result.bidAmount === '0.0') {
+                            bidInfo += result.winningBidAmount;
+                            bidInfo += '/';
+                            bidInfo += result.value;
+                        } else {
+                            if (!result.winning) {
+                                bidInfo += result.bidAmount;
+                                bidInfo += '/';
+                            }
+                            bidInfo += result.winningBidAmount;
+                            bidInfo += '/';
+                            bidInfo += result.value;
+                        }
+                    }
+
+                    console.log('  ' +
+                                result.name +
+                                Space30.substring(result.name.length) +
+                                dateInfo +
+                                Space40.substring(dateInfo.length) +
+                                bidInfo);
+                });
+
+                Promise.all(warningPromises).then(function(warnings) {
+                    warnings.forEach(function(warnings) {
+                        warnings.forEach(function(warning) {
+                            console.log('Warning: ' + warning);
+                        });
+                    });
+                });
+            });
+
         })();
         break;
-    */
 
     case 'watch':
+        (function() {
+            var name = opts.args.shift();
+
+            var watching = false;
+            loadLog().forEach(function(log) {
+                if (log.command === 'watch' && log.name === name) {
+                    watching = true;
+                }
+            });
+
+            getNameInfo(name).then(function(result) {
+                dumpNameInfo(result);
+                if (!watching) {
+                    addLog('watch', {
+                        name: name,
+                        startDate: result.startDate.getTime()
+                    });
+                }
+            });
+        })();
+        break;
+
+    case 'ignore':
+        (function() {
+            var name = opts.args.shift();
+            getNameInfo(name).then(function(result) {
+                dumpNameInfo(result);
+                addLog('ignore', {
+                    name: name
+                });
+            });
+        })();
+        break;
+
+    case 'watch-old':
         (function() {
             var Status = [
                 'Low bid or placed after reveal began (returned 99.5%)',
@@ -573,10 +841,10 @@ switch (command) {
             var name = opts.args.shift();
             getNameInfo(name).then(function(result) {
                 var errors = {
-                    'auction': 'name already up for auction; please `bid` before ' + getHumanDate(result.revealDate),
+                    'auction': 'name already up for auction; please "bid" before ' + getHumanDate(result.revealDate),
                     'owned': 'name already owned',
                     'forbidden': 'name forbidden',
-                    'reveal': 'bidding closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'reveal': 'bidding closed; please "reveal" your bid before ' + getHumanDate(result.endDate),
                     'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
                 };
                 if (errors[result.state]) {
@@ -605,10 +873,10 @@ switch (command) {
             var extraAmount = (opts.options.extra || ethers.utils.bigNumberify(0));
             getNameInfo(name).then(function(result) {
                 var errors = {
-                    'open': 'name not up for auction yet; please `start` first',
+                    'open': 'name not up for auction yet; please "start" first',
                     'owned': 'name already owned',
                     'forbidden': 'name forbidden',
-                    'reveal': 'bidding closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'reveal': 'bidding closed; please "reveal" your bid before ' + getHumanDate(result.endDate),
                     'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
                 };
 
@@ -644,7 +912,7 @@ switch (command) {
             getNameInfo(name).then(function(result) {
                 var errors = {
                     'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
-                    'open': 'name not up for auction yet; please `start` first',
+                    'open': 'name not up for auction yet; please "start" first',
                     'owned': 'name already owned',
                     'forbidden': 'name forbidden',
                     'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
@@ -679,9 +947,9 @@ switch (command) {
             getNameInfo(name).then(function(result) {
                 var errors = {
                     'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
-                    'open': 'name not up for auction yet; please `start` first',
+                    'open': 'name not up for auction yet; please "start" first',
                     'forbidden': 'name forbidden',
-                    'reveal': 'auction closed; please `reveal` your bid before ' + getHumanDate(result.endDate),
+                    'reveal': 'auction closed; please "reveal" your bid before ' + getHumanDate(result.endDate),
                     'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
                 };
 
@@ -704,6 +972,7 @@ switch (command) {
             });
         })();
         break;
+
 
     case 'set-resolver':
         (function() {
