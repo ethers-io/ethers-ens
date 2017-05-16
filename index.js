@@ -3,13 +3,11 @@
 var ethers = require('ethers');
 
 // Debugging...
-/*
 process.on('unhandledRejection', function(reason, p){
     console.log("Possibly Unhandled Rejection at: Promise ", p, " reason: ", reason);
     console.log(p);
     console.log(reason);
 });
-*/
 var ZeroAddress = '0x0000000000000000000000000000000000000000';
 
 var ensInterface = [
@@ -452,16 +450,65 @@ Registrar.prototype.placeBid = function(name, bidAmount, salt, extraAmount) {
     });
 }
 
+var StringZeros = '0000000000000000000000000000000000000000000000000000000000000000';
+
+function uintify(value) {
+    value = ethers.utils.bigNumberify(value).toHexString().substring(2);
+    value = '0x' + StringZeros.substring(value.length) + value;
+    return value;
+}
+
+Registrar.prototype.getDeedAddress = function(address, bidHash) {
+    var addressBytes32 = '0x000000000000000000000000' + address.substring(2);
+    var position = ethers.utils.keccak256(ethers.utils.concat([
+        bidHash,
+        ethers.utils.keccak256(ethers.utils.concat([
+            addressBytes32,
+            uintify(3)
+        ]))
+    ]));
+
+    var self = this;
+    return this._getEns('nothing-important.eth').then(function(result) {
+        return self.provider.getStorageAt(result.registrarContract.address, position).then(function(result) {
+            return '0x' + result.substring(26);
+        });
+    });
+}
+
+
 Registrar.prototype.revealBid = function(name, bidAmount, salt) {
     if (!this.signer) {
         return Promise.reject(new Error('no signer'));
     }
 
+    var self = this;
+
     return this._getBidHash(name, bidAmount, salt).then(function(result) {
+        return self.signer.getAddress().then(function(address) {
+            return self.getDeedAddress(address, result.sealedBid).then(function(deedAddress) {
+                if (deedAddress == ZeroAddress) {
+                    var error = new Error('bid not found');
+                    error.address = address;
+                    error.bidAmount = bidAmount;
+                    error.name = name;
+                    error.salt = salt;
+                    error.sealedBid = result.sealedBid;
+                    return Promise.reject(error);
+                }
+                console.log(address, result.sealedBid, deedAddress);
+                return result;
+            });
+        });
+    }).then(function(result) {
+        var options = {
+            gasLimit: 200000
+        };
         return result.registrarContract.unsealBid(
             result.labelHash,
             bidAmount,
-            result.salt
+            result.salt,
+            options
         ).then(function(transaction) {
             transaction.name = name;
             transaction.labelHash = result.labelHash;
@@ -508,6 +555,8 @@ Registrar.prototype.getDeedOwner = function(address) {
     var deedContract = new ethers.Contract(address, deedInterface, this.provider);
     return deedContract.owner().then(function(result) {
         return result.owner;
+    }, function (error) {
+        return null;
     });
 }
 
@@ -553,4 +602,3 @@ Registrar.prototype.on = function(event, callback) {
 }
 
 module.exports = Registrar;
-
