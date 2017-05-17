@@ -506,7 +506,7 @@ switch (command) {
                 });
             } else {
                 var address = ethers.utils.getAddress(JSON.parse(json).address);
-                console.log('Address: 0x' + address);
+                console.log('Address: ' + address);
                 providerOrSigner.getBalance(address).then(function(balance) {
                     console.log('Balance: ' + ethers.utils.formatEther(balance));
                 });
