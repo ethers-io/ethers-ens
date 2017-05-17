@@ -34,7 +34,9 @@ Usage:
     ethers-ens info FILENAME [--check-password]
 
     ethers-ens lookup NAME [ NAME ... ]
-    ethers-ens watch
+    ethers-ens scan-log
+    ethers-ens watch NAME
+    ethers-ens ignore NAME
 
     ethers-ens start-auction NAME
     ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]
@@ -46,6 +48,7 @@ Usage:
 
 Options
     --help             Show this help screen
+    --rpc NODE         Use the JSON-RPC node
     --testnet          Use the ropsten test network
     --account ACCOUNT  The JSON wallet to use
     --check-password   Require the password to check JSON wallet
@@ -72,13 +75,15 @@ to *ens-log.txt*.
 Please do not delete or modify this file; if something goes wrong it may be able to help
 recover or determine your state.
 
-The log will also be used in the (near) future to scan for warnings and make recommendations,
-such as:
+Logs can currently help detect:
 
-- An auction that was started, but has not yet been bid on
-- A bid that was placed, but has not been revealed
-- An auction which has been won, but not yet finalized
-- Transactions which have failed
+- Bids that were (for whatver reason) not successfully mined on the blockchain
+- Bids that require revealing
+
+Future Warnings: (@TODO)
+
+- Auctions which you won, but have not been finalized
+- Auctions that have been started for "watch" name, which have not been bid on
 
 
 ### Create a new JSON Wallet
@@ -147,20 +152,37 @@ testing.eth
 ```
 
 
-### Watching Events
+### Watching Names
 
-This is still in the early stages, but will listen for the related events on the blockchain.
+To keep an eye on names (during `scan-log`), add the name to the watch list.
 
 ```
-/Users/ethers> ethers-ens --testnet watch
+/Users/ethers> ethers-ens --testnet watch pokemoose.eth
 Network: testnet
-AuctionStarted
-  Label Hash:         0x5f16f4c7f149ac4f9510d9cf8cf384038ad348b3bcdc01915f95de12df9d1b02
-  Registrartion Date: 2017-05-15 15:24:44 (in 4:23:59:39)
-NewBid
-  Sealed Bid: 0x1778a8db6855506c49f1bd1477ca17ce89963fafc0cdd68adfa1210d0291c302
-  Bidder:     0x3A9ffB4E5A9C0226ac28B18A9F419C033aD9f0A7
-  Deposit:    1.01
+@TODO
+```
+
+### Ignoring Names
+
+Once you are no longer interested in tracking a name (during `scan-log`), remove the
+name from the watch list.
+
+```
+/Users/ethers> ethers-ens --testnet ignore pokemoose.eth
+Network: testnet
+@TODO
+```
+
+
+### Checking Status
+
+Dump a summary of all domains being watched (any name which you have started an auction
+for, bid on or are watching), the current status, your bid, highest bid and value.
+
+```
+/Users/ethers> ethers-ens --testnet scan-log
+Network: testnet
+@TODO
 ```
 
 
@@ -290,6 +312,8 @@ var registrar = new Registrar(wallet);
 ### Registrar.prototype.finalizeAuction(name)
 
 ### Registrar.prototype.placeBid(name, bidAmount, salt, extraAmount)
+
+### Registrar.prototype.getDeedAddress(address, sealedBid)
 
 ### Registrar.prototype.revealBid(name, bidAmount, salt)
 
