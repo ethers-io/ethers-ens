@@ -370,12 +370,15 @@ Registrar.prototype._getEns = function(name) {
 Registrar.config = {
     mainnet: {
         ensAddress: '0x314159265dd8dbb310642f98f50c066173c1259b',
-        publicResolver: '0x1da022710df5002339274aadee8d58218e9d6ab5'
+
+        // https://etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
+        publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     },
     testnet: {
         ensAddress: '0x112234455c3a32fd11230c42e7bccd4a84e02010',
-        //publicResolver: '0x4c641fb9bad9b60ef180c31f56051ce826d21a9a'
-        publicResolver: '0x88F5A4BEfcCAF9c16e1726830A2Be9f471CEA0B4'
+
+        // https://ropsten.etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
+        publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     }
 }
 
