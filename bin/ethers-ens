@@ -19,6 +19,10 @@ function getPassword(message) {
     return ethers.utils.toUtf8Bytes(password.normalize('NFKC'));
 }
 
+function isValidHashRegistrarName(name) {
+    return !!(name.match(/^[a-z_-]+\.eth$/));
+}
+
 function showHelp(error) {
     console.log('');
     console.log('Command Line Interface - ethers-ens/' + version);
@@ -41,6 +45,11 @@ function showHelp(error) {
     console.log('');
     console.log('    ethers-ens set-resolver NAME [--resolver ADDRESS]');
     console.log('    ethers-ens set-address NAME ADDRESS');
+    console.log('    ethers-ens set-email NAME EMAIL');
+    console.log('    ethers-ens set-publickey NAME PUBLICKEY');
+    console.log('    ethers-ens set-url NAME URL');
+    console.log('');
+    console.log('    ethers-ens set-subnode LABEL.NAME [--owner OWNER]');
     console.log('');
     console.log('Options');
     console.log('    --help             Show this help screen');
@@ -70,6 +79,7 @@ try {
     var opts = getopts({
         account: '',
         extra: '',
+        owner: '',
         resolver: '',
         rpc: '',
         salt: '',
@@ -165,6 +175,12 @@ try {
         }
     }
 
+    function ensureHashRegistrar(name) {
+        if (!isValidHashRegistrarName(name)) {
+            throw new Error('NAME must be LABEL.eth');
+        }
+    }
+
     function parseEther(argument, message) {
         try {
             if (typeof(argument) === 'number') {
@@ -210,11 +226,13 @@ try {
 
         case 'start-auction':
             ensureArgs(1, '"start-auction" requires NAME');
+            ensureHashRegistrar(opts.args[0]);
             requireAccount();
             break;
 
         case 'bid':
             ensureArgs(2, '"bid" requires NAME and AMOUNT');
+            ensureHashRegistrar(opts.args[0]);
             parseEther(1, 'invalid bid AMOUNT')
             if (opts.options.extra) {
                 parseEther('extra', 'invalid extra AMOUNT')
@@ -225,6 +243,7 @@ try {
 
         case 'reveal-bid':
             ensureArgs(2, '"reveal-bid" requires NAME and AMOUNT');
+            ensureHashRegistrar(opts.args[0]);
             parseEther(1, 'invalid bid AMOUNT');
             allowSalt();
             requireAccount();
@@ -232,6 +251,7 @@ try {
 
         case 'finalize-auction':
             ensureArgs(1, '"finalize-auction" requires NAME');
+            ensureHashRegistrar(opts.args[0]);
             requireAccount();
             break;
 
@@ -246,6 +266,32 @@ try {
         case 'set-address':
             ensureArgs(2, '"set-address" requires NAME and ADDRESS');
             requireAccount();
+            break;
+
+        case 'set-email':
+            ensureArgs(2, '"set-email" requires NAME and EMAIL');
+            requireAccount();
+            break;
+
+        case 'set-publickey':
+            ensureArgs(2, '"set-publickey" requires NAME and PUBLICKEY');
+            requireAccount();
+            break;
+
+        case 'set-url':
+            ensureArgs(2, '"set-url" requires NAME and URL');
+            requireAccount();
+            break;
+
+        case 'set-subnode':
+            ensureArgs(1, '"set-subnode" requires LABEL.NAME');
+            requireAccount();
+
+            // If owner is specified, make sure it is a valid address
+            if (opts.options.owner) {
+                ethers.utils.getAddress(opts.options.owner);
+            }
+
             break;
 
         default:
@@ -350,33 +396,65 @@ function getHumanDate(timestamp) {
 }
 
 // Fetch all info about a name we could care about
-function getNameInfo(name) {
-    return Promise.all([
-        registrar.getAuction(name),
-        registrar.getAuctionStartDate(name),
+function getNameInfo(name, extra) {
+
+    var promises = [
         registrar.getResolver(name),
         registrar.getOwner(name),
         registrar.getAddress(name)
-    ]).then(function(result) {
-        var nameInfo = result[0];
-        nameInfo.startDate = result[1];
-        nameInfo.resolver = result[2];
-        nameInfo.owner = result[3];
-        nameInfo.addr = result[4];
-        nameInfo.name = name;
-        if (nameInfo.winningDeed !== '0x0000000000000000000000000000000000000000') {
-            return registrar.getDeedOwner(nameInfo.winningDeed).then(function(owner) {
-                nameInfo.winningBidder = owner;
-                return nameInfo;
-            });
+    ];
+
+    if (extra) {
+        promises.push(registrar.getPublicKey(name));
+        promises.push(registrar.getText(name, 'url'));
+        promises.push(registrar.getText(name, 'email'));
+    }
+
+    if (isValidHashRegistrarName(name)) {
+        promises.push(registrar.getAuction(name));
+        promises.push(registrar.getAuctionStartDate(name));
+    }
+
+    return Promise.all(promises).then(function(result) {
+        var nameInfo = {
+            resolver: result[0],
+            owner: result[1],
+            addr: result[2],
+            name: name
+        };
+
+        var index = 3;
+
+        if (extra) {
+            nameInfo.publicKey = result[index++];
+            nameInfo.url = result[index++];
+            nameInfo.email = result[index++];
         }
+
+        if (isValidHashRegistrarName(name)) {
+            var info = result[index++];
+            ['endDate', 'highestBid', 'revealDate', 'state', 'value', 'winningDeed'].forEach(function(key) {
+                nameInfo[key] = info[key];
+            });
+            nameInfo.startDate = result[index++];
+
+            if (nameInfo.winningDeed !== '0x0000000000000000000000000000000000000000') {
+                return registrar.getDeedOwner(nameInfo.winningDeed).then(function(owner) {
+                    nameInfo.winningBidder = owner;
+                    return nameInfo;
+                });
+            }
+        }
+
         return nameInfo;
     })
 }
 
 function dumpNameInfo(result) {
-    console.log('  State:                ' + result.state);
-    console.log('  Available Start Date: ' + getHumanDate(result.startDate));
+    if (result.state) {
+        console.log('  State:                ' + result.state);
+        console.log('  Available Start Date: ' + getHumanDate(result.startDate));
+    }
     if (result.state == 'auction' || result.state == 'reveal' || result.state == '') {
         console.log('  Auction Reveal Date:  ' + getHumanDate(result.revealDate));
         console.log('  Auction End Date:     ' + getHumanDate(result.endDate));
@@ -387,10 +465,19 @@ function dumpNameInfo(result) {
         console.log('  Value:                ' + ethers.utils.formatEther(result.value));
         console.log('  Highest Bid:          ' + ethers.utils.formatEther(result.highestBid));
     }
-    if (result.state == 'owned') {
+    if (result.state == 'owned' || !result.state) {
         console.log('  Owner:                ' + result.owner);
         console.log('  Resolver:             ' + result.resolver);
         console.log('  Address:              ' + result.addr);
+        if (result.publicKey) {
+            console.log('  Public Key:           ' + result.publicKey);
+        }
+        if (result.email) {
+            console.log('  Email:                ' + result.email);
+        }
+        if (result.url) {
+            console.log('  URL:                  ' + result.url);
+        }
     }
 }
 
@@ -519,7 +606,7 @@ switch (command) {
         (function() {
             var namePromises = [];
             opts.args.forEach(function(name) {
-                namePromises.push(getNameInfo(name));
+                namePromises.push(getNameInfo(name, true));
             });
 
             Promise.all(namePromises).then(function(results) {
@@ -1021,6 +1108,89 @@ switch (command) {
                 });
                 console.log('  Node Hash:            ' + result.nodeHash);
                 console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+
+    case 'set-publickey':
+        (function() {
+            var name = opts.args.shift();
+            var publickey = opts.args.shift();
+            registrar.setPublicKey(name, publickey).then(function(result) {
+                addLog('setPublicKey', {
+                    address: result.from,
+                    publicKey: result.publicKey,
+                    name: name,
+                    nodeHash: result.nodeHash,
+                    transactionHash: result.hash,
+                });
+                console.log('  Node Hash:            ' + result.nodeHash);
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+
+    case 'set-email':
+    case 'set-url':
+        (function() {
+            var name = opts.args.shift();
+            var textValue = opts.args.shift();
+
+            var textKey = '';
+            if (command === 'set-email') {
+                textKey = 'email';
+            } else if (command === 'set-url') {
+                textKey = 'url';
+            } else {
+                throw new Error('Do not enter');
+            }
+
+            registrar.setText(name, textKey, textValue).then(function(result) {
+                addLog('setText', {
+                    address: result.from,
+                    key: textKey,
+                    text: textValue,
+                    name: name,
+                    nodeHash: result.nodeHash,
+                    transactionHash: result.hash,
+                });
+                console.log('  Node Hash:            ' + result.nodeHash);
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+
+    case 'set-subnode':
+        (function() {
+            var name = opts.args.shift();
+            var owner = opts.options.owner;
+
+            var match = name.match(/^([^.]+)\.(.+)$/);
+            var label = match[1];
+            var parentName = match[2];
+
+            // Use the owner, or lookup the owner of the parentName
+            if (owner) {
+                owner = Promise.resolve(owner);
+            } else {
+                owner = registrar.getOwner(parentName);
+            }
+
+            owner.then(function(owner) {
+                registrar.setSubnodeOwner(parentName, label, owner).then(function(result) {
+                    addLog('setSubnode', {
+                        address: result.from,
+                        label: result.label,
+                        labelHash: result.labelHash,
+                        name: name,
+                        owner: owner,
+                        parentName: result.parentName,
+                        nodeHash: result.nodeHash,
+                        transactionHash: result.hash,
+                    });
+                    console.log('  Node Hash:            ' + result.nodeHash);
+                    console.log('  Transaction Hash:     ' + result.hash);
+                });
             });
         })();
         break;

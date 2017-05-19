@@ -9,6 +9,7 @@ process.on('unhandledRejection', function(reason, p){
     console.log(reason);
 });
 var ZeroAddress = '0x0000000000000000000000000000000000000000';
+var ZeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 var ensInterface = [
     {
@@ -17,6 +18,17 @@ var ensInterface = [
         inputs : [ { name: "nodeHash", type: "bytes32" } ],
         name: "owner",
         constant: true
+    },
+    {
+        outputs: [ ],
+        type: "function",
+        inputs : [
+            { name: "node", type: "bytes32" },
+            { name: "label", type: "bytes32" },
+            { name: "owner", type: "address" }
+        ],
+        name: "setSubnodeOwner",
+        constant: false
     },
     {
         outputs: [ { name: "resolver", type: "address" } ],
@@ -211,6 +223,16 @@ var resolverInterface = [
         outputs: [ { name: "addr", type: "address" } ]
     },
     {
+        name: "pubkey",
+        constant: true,
+        inputs: [ { name: "nodeHash", type: "bytes32" } ],
+        type: "function",
+        outputs: [
+            { name: "x", type: "bytes32" },
+            { name: "y", type: "bytes32" }
+        ]
+    },
+    {
         name: "setAddr",
         constant: false,
         inputs: [
@@ -219,6 +241,45 @@ var resolverInterface = [
         ],
         type: "function",
         outputs: [ ]
+    },
+    {
+        name: "setPubkey",
+        constant: false,
+        inputs: [
+            { name: "nodeHash", type: "bytes32" },
+            { name: "x", type: "bytes32" },
+            { name: "y", type: "bytes32" }
+        ],
+        type: "function",
+        outputs: [ ]
+    },
+    {
+        name: "setText",
+        constant: false,
+        inputs: [
+            { name: "nodeHash", type: "bytes32" },
+            { name: "key", type: "string" },
+            { name: "value", type: "string" }
+        ],
+        type: "function",
+        outputs: [ ]
+    },
+    {
+        name: "supportsInterface",
+        constant: true,
+        inputs: [ { name: "interfaceId", type: "bytes4" } ],
+        type: "function",
+        outputs: [ { name: "supported", type: "bool" } ]
+    },
+    {
+        name: "text",
+        constant: true,
+        inputs: [
+            { name: "nodeHash", type: "bytes32" },
+            { name: "key", type: "string" }
+        ],
+        type: "function",
+        outputs: [ { name: "text", type: "string" } ]
     },
 ];
 
@@ -313,7 +374,8 @@ Registrar.config = {
     },
     testnet: {
         ensAddress: '0x112234455c3a32fd11230c42e7bccd4a84e02010',
-        publicResolver: '0x4c641fb9bad9b60ef180c31f56051ce826d21a9a'
+        //publicResolver: '0x4c641fb9bad9b60ef180c31f56051ce826d21a9a'
+        publicResolver: '0x88F5A4BEfcCAF9c16e1726830A2Be9f471CEA0B4'
     }
 }
 
@@ -524,6 +586,7 @@ Registrar.prototype.getResolver = function(name) {
     var providerOrSigner = this.signer || this.provider;
     var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, providerOrSigner);
     return ensContract.resolver(ethers.utils.namehash(name)).then(function(result) {
+        if (result.resolver === ZeroAddress) { return null; }
         return result.resolver;
     });
 }
@@ -560,19 +623,36 @@ Registrar.prototype.getDeedOwner = function(address) {
     });
 }
 
+Registrar.prototype._getResolver = function(name, interfaceId) {
+    var signerOrProvider = this.signer || this.provider;
+    return this.getResolver(name).then(function(resolverAddress) {
+        if (resolverAddress === ZeroAddress) { throw new Error('invalid resolver'); }
+        var resolverContract = new ethers.Contract(resolverAddress, resolverInterface, signerOrProvider);
+        if (interfaceId) {
+            return resolverContract.supportsInterface(interfaceId).then(function(result) {
+                if (!result.supported) { throw new Error('unsupported method'); }
+                return resolverContract;
+            });
+        }
+        return resolverContract;;
+    });
+}
+
+var InterfaceIdAddr = '0x3b3b57de';
+var InterfaceIdText = '0x59d1d43c';
+var InterfaceIdPubkey = '0xc8690233';
+
 Registrar.prototype.setAddress = function(name, addr) {
     var options = {
         gasLimit: 150000
     };
     var nodeHash = ethers.utils.namehash(name);
-    var self = this;
-    return this.getResolver(name).then(function(resolver) {
-        var resolverContract = new ethers.Contract(resolver, resolverInterface, self.signer);
+    return this._getResolver(name, InterfaceIdAddr).then(function(resolverContract) {
         return resolverContract.setAddr(nodeHash, addr, options).then(function(transaction) {
             transaction.addr = addr;
             transaction.name = name;
             transaction.nodeHash = nodeHash;
-            transaction.resolver = resolver;
+            transaction.resolver = resolverContract.address;
             return transaction;
         });
     });
@@ -580,18 +660,99 @@ Registrar.prototype.setAddress = function(name, addr) {
 
 Registrar.prototype.getAddress = function(name) {
     var nodeHash = ethers.utils.namehash(name);
-    var self = this;
-    return this.getResolver(name).then(function(resolver) {
-        if (resolver === ZeroAddress) {
-            return Promise.resolve(null);
-        }
-
-        var resolverContract = new ethers.Contract(resolver, resolverInterface, self.provider);
+    return this._getResolver(name).then(function(resolverContract) {
         return resolverContract.addr(nodeHash).then(function(result) {
+            if (result.addr === ZeroAddress) { return null; }
             return result.addr;
         }, function (error) {
             return null;
         });
+    }, function(error) {
+        return null;
+    });
+}
+
+Registrar.prototype.setPublicKey = function(name, publicKey) {
+    var nodeHash = ethers.utils.namehash(name);
+
+    // Make sure the key is uncompressed, and strip the '0x04' prefix
+    publicKey = ethers._SigningKey.getPublicKey(publicKey, false).substring(4);
+
+    var x = '0x' + publicKey.substring(0, 64);
+    var y = '0x' + publicKey.substring(64, 128);
+
+    return this._getResolver(name, InterfaceIdPubkey).then(function(resolverContract) {
+        return resolverContract.setPubkey(nodeHash, x, y).then(function(transaction) {
+            transaction.name = name;
+            transaction.nodeHash = nodeHash;
+            transaction.publicKey = publicKey;
+            transaction.resolver = resolverContract.address;
+            return transaction;
+        });
+    });
+}
+
+Registrar.prototype.getPublicKey = function(name, compressed) {
+    var nodeHash = ethers.utils.namehash(name);
+    return this._getResolver(name).then(function(resolverContract) {
+        return resolverContract.pubkey(nodeHash).then(function(result) {
+            if (result.x === ZeroBytes32 && result.y === ZeroBytes32) {
+                return null;
+            }
+            return '0x04' + result.x.substring(2) + result.y.substring(2);
+        }, function (error) {
+            return null;
+        });
+    }, function(error) {
+        return null;
+    });
+}
+
+Registrar.prototype.setText = function(name, key, value) {
+    var nodeHash = ethers.utils.namehash(name);
+
+    return this._getResolver(name, InterfaceIdText).then(function(resolverContract) {
+        return resolverContract.setText(nodeHash, key, value).then(function(transaction) {
+            transaction.key = key;
+            transaction.name = name;
+            transaction.nodeHash = nodeHash;
+            transaction.resolver = resolverContract.address;
+            transaction.text = value;
+            return transaction;
+        });
+    });
+}
+
+Registrar.prototype.getText = function(name, key) {
+    var nodeHash = ethers.utils.namehash(name);
+    return this._getResolver(name).then(function(resolverContract) {
+        return resolverContract.text(nodeHash, key).then(function(result) {
+            return result.text;
+        }, function (error) {
+            return null;
+        });
+    }, function(error) {
+        return null;
+    });
+}
+
+Registrar.prototype.setSubnodeOwner = function(parentName, label, owner) {
+
+    var nodeHash = ethers.utils.namehash(parentName);
+    var labelHash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(label));
+
+    var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, this.signer);
+
+    // @TODO: Check first that the nodeHash is owned by the signer
+    // @TODO: Check the nodeHash exists
+
+    return ensContract.setSubnodeOwner(nodeHash, labelHash, owner).then(function(result) {
+        result.labelHash = labelHash;
+        result.label = label;
+        result.nodeHash = nodeHash;
+        result.owner = owner;
+        result.parentName = parentName;
+        return result;
     });
 }
 
