@@ -35,8 +35,8 @@ Usage:
 
     ethers-ens lookup NAME [ NAME ... ]
     ethers-ens scan-log
-    ethers-ens watch NAME
-    ethers-ens ignore NAME
+    ethers-ens watch NAME [ NAME ... ]
+    ethers-ens ignore NAME [ NAME ... ]
 
     ethers-ens start-auction NAME
     ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]
@@ -45,6 +45,11 @@ Usage:
 
     ethers-ens set-resolver NAME [--resolver ADDRESS]
     ethers-ens set-address NAME ADDRESS
+    ethers-ens set-email NAME EMAIL
+    ethers-ens set-publickey NAME KEY
+    ethers-ens set-url NAME URL
+
+    ethers-ens set-subnode LABEL.NAME [--owner OWNER]
 
 Options
     --help             Show this help screen

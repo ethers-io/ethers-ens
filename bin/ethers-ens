@@ -20,7 +20,7 @@ function getPassword(message) {
 }
 
 function isValidHashRegistrarName(name) {
-    return !!(name.match(/^[a-z_-]+\.eth$/));
+    return !!(name.match(/^[a-z0-9_-]+\.eth$/));
 }
 
 function showHelp(error) {
@@ -35,8 +35,8 @@ function showHelp(error) {
     console.log('    ethers-ens lookup NAME [ NAME ... ]');
     console.log('    ethers-ens scan-log');
     //console.log('    ethers-ens check-bid SEALED_BID');
-    console.log('    ethers-ens watch NAME');
-    console.log('    ethers-ens ignore NAME');
+    console.log('    ethers-ens watch NAME [ NAME ... ]');
+    console.log('    ethers-ens ignore NAME [ NAME ... ]');
     console.log('');
     console.log('    ethers-ens start-auction NAME');
     console.log('    ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]');
@@ -217,11 +217,15 @@ try {
             break;
 
         case 'watch':
-            ensureArgs(1, '"watch" requires NAME');
+            if (opts.args.length === 0) {
+                throw new Error('"watch" requires NAME [ NAME ... ]');
+            }
             break;
 
         case 'ignore':
-            ensureArgs(1, '"ignore" requires NAME');
+            if (opts.args.length === 0) {
+                throw new Error('"ignore" requires NAME [ NAME ... ]');
+            }
             break;
 
         case 'start-auction':
@@ -846,34 +850,53 @@ switch (command) {
 
     case 'watch':
         (function() {
-            var name = opts.args.shift();
+            var getInfoPromises = [];
 
-            var watching = false;
-            loadLog().forEach(function(log) {
-                if (log.command === 'watch' && log.name === name) {
-                    watching = true;
-                }
+            opts.args.forEach(function(name) {
+                getInfoPromises.push(getNameInfo(name));
             });
 
-            getNameInfo(name).then(function(result) {
-                dumpNameInfo(result);
-                if (!watching) {
-                    addLog('watch', {
-                        name: name,
-                        startDate: result.startDate.getTime()
+            Promise.all(getInfoPromises).then(function(result) {
+                result.forEach(function(result) {
+                    console.log(result.name);
+
+                    dumpNameInfo(result);
+
+                    var watching = false;
+                    loadLog().forEach(function(log) {
+                        if (log.command === 'watch' && log.name === result.name) {
+                            watching = true;
+                        }
                     });
-                }
+
+                    if (!watching) {
+                        addLog('watch', {
+                            name: result.name,
+                            startDate: result.startDate.getTime()
+                        });
+                    }
+                });
             });
         })();
         break;
 
     case 'ignore':
         (function() {
-            var name = opts.args.shift();
-            getNameInfo(name).then(function(result) {
-                dumpNameInfo(result);
-                addLog('ignore', {
-                    name: name
+            var getInfoPromises = [];
+
+            opts.args.forEach(function(name) {
+                getInfoPromises.push(getNameInfo(name));
+            });
+
+            Promise.all(getInfoPromises).then(function(result) {
+                result.forEach(function(result) {
+                    console.log(result.name);
+
+                    dumpNameInfo(result);
+
+                    addLog('ignore', {
+                        name: result.name
+                    });
                 });
             });
         })();
