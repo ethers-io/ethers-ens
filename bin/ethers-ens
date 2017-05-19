@@ -672,6 +672,10 @@ switch (command) {
 
             Object.keys(names).forEach(function(name) {
                 var auction = names[name];
+
+                // Non-auction name
+                if (!isValidHashRegistrarName(name)) { return; }
+
                 var auctionPromise = registrar.getAuction(auction.name).then(function(result) {
 
                     var ret = {
