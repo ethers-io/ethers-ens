@@ -397,7 +397,13 @@ function dumpNameInfo(result) {
 function loadLog() {
     var network = provider.testnet ? 'testnet': 'mainnet';
 
-    var data = fs.readFileSync('ens-log.txt').toString();
+    var data = '';
+    try {
+        data = fs.readFileSync('ens-log.txt').toString();
+    } catch (error) {
+        // File doesn't exist, so no log to load
+        if (error.code !== 'ENOENT') { throw error; }
+    }
 
     var entries = [], entry = {};
     data.split('\n').forEach(function(line) {
