@@ -3,11 +3,13 @@
 var ethers = require('ethers');
 
 // Debugging...
+/*
 process.on('unhandledRejection', function(reason, p){
     console.log("Possibly Unhandled Rejection at: Promise ", p, " reason: ", reason);
     console.log(p);
     console.log(reason);
 });
+*/
 var ZeroAddress = '0x0000000000000000000000000000000000000000';
 var ZeroBytes32 = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
