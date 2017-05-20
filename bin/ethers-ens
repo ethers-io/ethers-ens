@@ -60,6 +60,7 @@ function showHelp(error) {
     console.log('    --extra            Send extra ether to mask the bid value');
     console.log('    --salt             The salt to use (otherwise compute; recommended)');
     console.log('    --secret           Use keccak256(secret) as the salt');
+    console.log('    --cheap            Use low (but safe) 2.1 GWei gas price');
     console.log('    --nolog            Do not log activity to ens-log.txt');
     console.log('');
 

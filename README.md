@@ -60,6 +60,7 @@ Options
     --extra            Send extra ether to mask the bid value
     --salt             The salt to use (otherwise compute; recommended)
     --secret           Use keccak256(secret) as the salt
+    --cheap            Use low (but safe) 2.1 GWei gas price
     --nolog            Do not log activity to ens-log.txt
 ```
 
