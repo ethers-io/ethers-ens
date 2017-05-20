@@ -85,10 +85,11 @@ try {
         salt: '',
         secret: ''
     }, {
-        'testnet': false,
-        'nolog': false,
         'check-password': false,
+        'cheap': false,
         'help': false,
+        'nolog': false,
+        'testnet': false,
     });
 
     if (opts.flags.help) { showHelp();  }
@@ -137,6 +138,10 @@ try {
             },
             sendTransaction: function(transaction) {
                 return accountPromise.then(function(account) {
+                    if (opts.flags.cheap) {
+                        // 2.1 GWei
+                        transaction.gasPrice = "0x7d2b7500";
+                    }
                     return account.sendTransaction(transaction);
                 });
             },
