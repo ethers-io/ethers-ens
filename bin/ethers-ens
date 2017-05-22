@@ -20,7 +20,11 @@ function getPassword(message) {
 }
 
 function isValidHashRegistrarName(name) {
-    return !!(name.match(/^[a-z0-9_-]+\.eth$/));
+    return !!(name.match(/^[a-zA-Z0-9_-]+\.eth$/));
+}
+
+function isValidName(name) {
+    return !!(name.match(/^[a-zA-Z0-9_.-]+\.eth$/));
 }
 
 function showHelp(error) {
@@ -622,6 +626,10 @@ switch (command) {
         (function() {
             var namePromises = [];
             opts.args.forEach(function(name) {
+                if (!isValidName(name)) {
+                    console.log('Invalid ENS Name: ' + name);
+                    return;
+                }
                 namePromises.push(getNameInfo(name, true));
             });
 
@@ -859,6 +867,10 @@ switch (command) {
             var getInfoPromises = [];
 
             opts.args.forEach(function(name) {
+                if (!isValidHashRegistrarName(name)) {
+                    console.log('Invalid ENS Name: ' + name);
+                    return;
+                }
                 getInfoPromises.push(getNameInfo(name));
             });
 
@@ -891,6 +903,10 @@ switch (command) {
             var getInfoPromises = [];
 
             opts.args.forEach(function(name) {
+                if (!isValidHashRegistrarName(name)) {
+                    console.log('Invalid ENS Name: ' + name);
+                    return;
+                }
                 getInfoPromises.push(getNameInfo(name));
             });
 
