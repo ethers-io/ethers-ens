@@ -686,7 +686,6 @@ switch (command) {
             }
 
             var auctionPromises = [];
-            var warningPromises = [];
 
             Object.keys(names).forEach(function(name) {
                 var auction = names[name];
@@ -696,18 +695,18 @@ switch (command) {
 
                 var auctionPromise = registrar.getAuction(auction.name).then(function(result) {
 
-                    var ret = {
+                    var ret = Promise.resolve({
                         date: result.endDate,
                         endDate: result.endDate,
                         name: auction.name,
                         state: result.state,
                         value: ethers.utils.formatEther(result.value),
                         winningBidAmount: ethers.utils.formatEther(result.highestBid),
-                    };
+                    });
 
                     if (result.state === 'open' || result.state === 'not-yet-available') {
                         // The interesting date is the auction start date; look it up
-                        ret = Promise.resolve(ret).then(function(ret) {
+                        ret = ret.then(function(ret) {
                             return registrar.getAuctionStartDate(auction.name).then(function(startDate) {
                                 ret.date = startDate;
                                 return ret;
@@ -716,13 +715,14 @@ switch (command) {
                     }
 
                     if (result.state === 'owned') {
-                        ret = Promise.resolve(ret).then(function(ret) {
+                        ret = ret.then(function(ret) {
                             return Promise.all([
                                 registrar.getOwner(auction.name),
                                 registrar.getDeedOwner(result.winningDeed)
                             ]).then(function(result) {
                                 ret.winning = false;
                                 auction.operations.forEach(function(operation) {
+                                    ret.owner = result[0];
                                     if (operation.address === result[0] || operation.address === result[1]) {
                                         ret.winning = true;
                                         ret.bidAmount = ret.winningBidAmount;
@@ -739,21 +739,17 @@ switch (command) {
                     // Make sure our placeBids have deeds
                     if (result.state === 'auction') {
                         // The interesting date is when the bidding end date
-                        ret.date = result.revealDate;
-
-                        ret.bidAmount = getMaxBid(auction);
-
-                        // If a bid doesn't have a deed, the bid failed!
-                        warningPromises.push(
-                            getDeeds(auction).then(function(deeds) {
-                                var warnings = [];
+                        ret = ret.then(function(ret) {
+                            ret.date = result.revealDate;
+                            ret.bidAmount = getMaxBid(auction);
+                            return getDeeds(auction).then(function(deeds) {
+                                ret.deedAddresses = [];
                                 deeds.forEach(function(deed) {
-                                    if (deed.address != ZeroAddress) { return; }
-                                    warnings.push('placeBid(' + auction.name + ', ' + deed.bidAmount + ') is missing on the blockchain');
+                                    ret.deedAddresses.push(deed.address);
                                 });
-                                return warnings;
+                                return ret;
                             })
-                        );
+                        });
                     }
 
                     if (result.state === 'reveal') {
@@ -776,20 +772,21 @@ switch (command) {
                                 });
                             });
                         } else {
-                            ret.bidAmount = getMaxBid(auction);
+                            ret = ret.then(function(ret) {
+                                ret.bidAmount = getMaxBid(auction);
+                                return ret;
+                            });
                         }
 
-                        // If there are any non-zero-address deeds, the bid has not been revealed!
-                        warningPromises.push(
-                            getDeeds(auction).then(function(deeds) {
-                                var warnings = [];
+                        ret = ret.then(function(ret) {
+                            return getDeeds(auction).then(function(deeds) {
+                                ret.deedAddresses = [];
                                 deeds.forEach(function(deed) {
-                                    if (deed.address === ZeroAddress) { return; }
-                                    warnings.push('revealBid(' + auction.name + ', ' + deed.bidAmount + ') has not been called');
+                                    ret.deedAddresses.push(deed.address);
                                 });
-                                return warnings;
+                                return ret;
                             })
-                        );
+                        });
                     }
 
                     return ret;
@@ -815,6 +812,8 @@ switch (command) {
                     return a.endDate.getTime() - b.endDate.getTime();
                 });
 
+                var warnings = [];
+
                 var lastState = null;
                 result.forEach(function(result) {
                     if (result.state !== lastState) {
@@ -823,7 +822,32 @@ switch (command) {
                     }
                     var dateInfo = getHumanDate(result.date);
 
-                    var bidInfo = (result.winning ? ' * ': '   ');
+                    var warn = false;
+                    if (result.state === 'auction' && result.deedAddresses) {
+                        result.deedAddresses.forEach(function(address) {
+                            if (address !== ZeroAddress) { return; }
+                            warnings.push('placeBid(' + result.name + ', ' + result.bidAmount + ') is missing on the blockchain');
+                            warn = true;
+                        });
+                    }
+
+                    if (result.state === 'reveal' && result.deedAddresses) {
+                        result.deedAddresses.forEach(function(address) {
+                            if (address === ZeroAddress) { return; }
+                            warnings.push('revealBid(' + result.name + ', ' + result.bidAmount + ') has not been called');
+                            warn = true;
+                        });
+                    }
+
+                    if (result.state === 'owned' && result.owner === ZeroAddress) {
+                        warnings.push('finalizeAuction(' + result.name + ') has not been called');
+                        warn = true;
+                    }
+
+                    var bidInfo = ' ';
+                    bidInfo += (warn ? '! ': '  ');
+                    bidInfo += (result.winning ? '* ': '  ');
+
                     if (result.state === 'auction' && result.bidAmount !== '0.0') {
                         bidInfo += result.bidAmount;
                     } else if (result.state === 'reveal' || result.state === 'owned') {
@@ -844,19 +868,17 @@ switch (command) {
 
                     console.log('  ' +
                                 result.name +
-                                Space30.substring(result.name.length) +
+                                Space.substring(result.name.length) +
                                 dateInfo +
                                 Space40.substring(dateInfo.length) +
                                 bidInfo);
                 });
 
-                Promise.all(warningPromises).then(function(warnings) {
-                    warnings.forEach(function(warnings) {
-                        warnings.forEach(function(warning) {
-                            console.log('Warning: ' + warning);
-                        });
+                if (warnings.length) {
+                    warnings.forEach(function(warning) {
+                        console.log('Warning: ' + warning);
                     });
-                });
+                }
             });
 
         })();
