@@ -839,7 +839,7 @@ switch (command) {
                         });
                     }
 
-                    if (result.state === 'owned' && result.owner === ZeroAddress) {
+                    if (result.state === 'owned' && result.owner === ZeroAddress && result.winning) {
                         warnings.push('finalizeAuction(' + result.name + ') has not been called');
                         warn = true;
                     }
