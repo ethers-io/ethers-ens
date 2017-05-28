@@ -340,7 +340,7 @@ Registrar.prototype._getEns = function(name) {
     }
 
     // Must be 7 characters or longer and contain only a-z, 0-0 and the hyphen (-)
-    if (comps[0].length < 7 || !comps[0].match(/^[a-z0-9-]*$/)) {
+    if (comps[0].length < 7 || !comps[0].match(/^[a-z0-9_-]*$/)) {
         return Promise.reject('invalid name (must be 7 of more character)');
     }
 
@@ -398,7 +398,7 @@ Registrar.prototype.isValidName = function(name) {
     }
 
     // Must be 7 characters or longer and contain only a-z, 0-0 and the hyphen (-)
-    if (comps[0].length < 7 || !comps[0].match(/^[a-z0-9-]*$/)) { return false; }
+    if (comps[0].length < 7 || !comps[0].match(/^[a-z0-9_-]*$/)) { return false; }
 
     return true;
 }
