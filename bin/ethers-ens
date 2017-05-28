@@ -845,7 +845,7 @@ switch (command) {
                     }
 
                     var bidInfo = ' ';
-                    bidInfo += (warn ? '! ': '  ');
+                    bidInfo += (warn ? '!! ': '   ');
                     bidInfo += (result.winning ? '* ': '  ');
 
                     if (result.state === 'auction' && result.bidAmount !== '0.0') {
