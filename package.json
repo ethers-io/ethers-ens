@@ -1,6 +1,6 @@
 {
   "name": "ethers-ens",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Library and command-line interface for Ethereum ENS.",
   "main": "index.js",
   "scripts": {
