@@ -1,6 +1,6 @@
 {
   "name": "ethers-ens",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Library and command-line interface for Ethereum ENS.",
   "main": "index.js",
   "scripts": {
@@ -15,7 +15,7 @@
     "namehash"
   ],
   "dependencies": {
-    "ethers": "^2.0.0",
+    "ethers": "^2.1.0",
     "ethers-cli": "1.0.2",
     "readline-sync": "1.4.4"
   },
