@@ -988,10 +988,15 @@ switch (command) {
                     name: data.name + '.eth',
                     salt: salt,
                 });
+                console.log('  Import:               ' + filename);
+                console.log('  Name:                 ' + data.name + '.eth');
+                console.log('  Bid Amount:           ' + ethers.utils.formatEther(data.value));
+                console.log('  Address:              ' + ethers.utils.getAddress(data.owner));
+                console.log('  Label Hash:           ' + data.nameSHA3);
+                console.log('  Salt:                 ' + salt);
             } catch (error) {
                 console.log(error);
             }
-            
         })();
         break;
 
