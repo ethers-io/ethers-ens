@@ -42,6 +42,8 @@ function showHelp(error) {
     console.log('    ethers-ens watch NAME [ NAME ... ]');
     console.log('    ethers-ens ignore NAME [ NAME ... ]');
     console.log('');
+    console.log('    ethers-ens import-bid FILENAME');
+    console.log('');
     console.log('    ethers-ens start-auction NAME');
     console.log('    ethers-ens bid NAME AMOUNT [--extra AMOUNT] [--salt SALT | --secret SECRET]');
     console.log('    ethers-ens reveal-bid NAME AMOUNT [--salt SALT | --secret SECRET]');
@@ -236,6 +238,10 @@ try {
             if (opts.args.length === 0) {
                 throw new Error('"ignore" requires NAME [ NAME ... ]');
             }
+            break;
+
+        case 'import-bid':
+            ensureArgs(1, '"import-bid" requires FILENAME');
             break;
 
         case 'start-auction':
@@ -665,7 +671,27 @@ switch (command) {
                 var promises = [];
                 auction.operations.forEach(function(operation) {
                     if (operation.command !== 'placeBid') { return; }
-                    var promise = registrar.getDeedAddress(operation.address, operation.sealedBid);
+
+                    var promise = null;
+
+                    // Get the sealed bid (or look if up if necessary)
+                    if (operation.sealedBid) {
+                        promise = Promise.resolve(operation.sealedBid);
+                    } else {
+                        promise = registrar.getBidHash(
+                            operation.name,
+                            operation.address,
+                            ethers.utils.parseEther(operation.bidAmount),
+                            operation.salt
+                       );
+                    }
+
+                    // Get the deed address
+                    promise = promise.then(function(sealedBid) {
+                        return registrar.getDeedAddress(operation.address, sealedBid);
+                    });
+
+                    // Add extra details
                     promise = promise.then(function(deed) {
                         return {
                             address: deed,
@@ -673,16 +699,11 @@ switch (command) {
                             sealedBid: operation.sealedBid
                         }
                     });
+
                     promises.push(promise);
                 });
 
                 return Promise.all(promises);
-                /*.then(function(deeds) {
-                    var unique = { };
-                    deeds.forEach(function(deed) { unique[deed] = true; });
-                    return Object.keys(unique);
-                });
-                */
             }
 
             var auctionPromises = [];
@@ -946,62 +967,31 @@ switch (command) {
         })();
         break;
 
-    case 'watch-old':
+    case 'import-bid':
         (function() {
-            var Status = [
-                'Low bid or placed after reveal began (returned 99.5%)',
-                'Late Reveal (return 0.5%)',
-                'New Winner',
-                'Low Bid, but second place (return 99.5%)',
-                'Low bid (return 99.5%)',
-            ];
-            registrar.on('BidRevealed', function(labelHash, owner, value, status) {
-                console.log('BidRevealed');
-                console.log('  Label Hash: ' + labelHash);
-                console.log('  Owner:      ' + owner);
-                console.log('  Value:      ' + ethers.utils.formatEther(value));
-                console.log('  Status:     ' + Status[status]);
-            });
+            var filename = opts.args.shift();
+            if (!fs.existsSync(filename)) {
+                console.log('Filename not found.');
+                process.exit(1);
+            }
+            try {
+                var data = JSON.parse(fs.readFileSync(filename));
 
-            registrar.on('NewBid', function(sealedBid, bidder, deposit) {
-                console.log('NewBid');
-                console.log('  Sealed Bid: ' + sealedBid);
-                console.log('  Bidder:     ' + bidder);
-                console.log('  Deposit:    ' + ethers.utils.formatEther(deposit));
-            });
+                var salt = ethers.utils.hexlify(data.secretSHA3);
+                if (salt.length !== 66) { throw new Error('invalid salt'); }
 
-            registrar.on('AuctionStarted', function(labelHash, registrationDate) {
-                console.log('AuctionStarted');
-                console.log('  Label Hash:         ' + labelHash);
-                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
-            });
-
-            registrar.on('HashRegistered', function(labelHash, owner, value, registrationDate) {
-                console.log('HashRegistered');
-                console.log('  Label Hash:         ' + labelHash);
-                console.log('  Owner:              ' + owner);
-                console.log('  Value:              ' + ether.utils.formatEther(value));
-                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
-            });
-
-            registrar.on('HashReleased', function(labelHash, value) {
-                console.log('HashReleased');
-                console.log('  Label Hash:         ' + labelHash);
-                console.log('  Value:              ' + ether.utils.formatEther(value));
-            });
-
-            registrar.on('HashInvalidated', function(labelHash, name, value, registrationDate) {
-                console.log('HashRegistered');
-                console.log('  Label Hash:         ' + labelHash);
-                console.log('  Name:               ' + name);
-                console.log('  Value:              ' + ether.utils.formatEther(value));
-                console.log('  Registrartion Date: ' + getHumanDate(new Date(registrationDate.toNumber() * 1000)));
-            });
-
-            registrar.provider.getBlockNumber().then(function(blockNumber) {
-                registrar.provider.resetEventsBlock(blockNumber - 20);
-            });
-
+                addLog('placeBid', {
+                    import: filename,
+                    address: ethers.utils.getAddress(data.owner),
+                    bidAmount: ethers.utils.formatEther(data.value),
+                    labelHash: data.nameSHA3,
+                    name: data.name + '.eth',
+                    salt: salt,
+                });
+            } catch (error) {
+                console.log(error);
+            }
+            
         })();
         break;
 
@@ -1090,6 +1080,33 @@ switch (command) {
                 if (errors[result.state]) {
                     console.log('  Error: ' + errors[result.state]);
                 } else {
+                    // No salt, check for a salt for this bid in the log
+                    if (!salt) {
+
+                        // Get all matching salts
+                        var salts = [];
+                        loadLog().forEach(function(operation) {
+                            if (operation.command !== 'placeBid') { return; }
+                            if (!bidAmount.eq(ethers.utils.parseEther(operation.bidAmount))) { return; }
+                            if (operation.name != name) { return; }
+                            salts.push(operation.salt);
+                        });
+
+                        // If there is more than one matching salt, very bad things happend:
+                        //   - Maybe they imported multiple bids with different salts
+                        //   - Forced a salt with this tool multiple times
+                        if (salts.length > 1) {
+                            console.log('ERROR: Multiple salts found for bid! Reveal each MANUALLY with --salt.');
+                            salts.forEach(function(salt) {
+                                console.log('  ' + salt);
+                            });
+                            process.exit(1);
+                        }
+
+                        // One salt, use it
+                        if (salts.length === 1) { salt = salts[0]; }
+                    }
+
                     registrar.revealBid(name, bidAmount, salt).then(function(result) {
                         addLog('revealBid', {
                             address: result.from,
@@ -1100,6 +1117,7 @@ switch (command) {
                             sealedBid: result.sealedBid,
                             transactionHash: result.hash
                         });
+
                         console.log('  Label Hash            ' + result.labelHash);
                         console.log('  Salt:                 ' + result.salt);
                         console.log('  Sealed Bid:           ' + result.sealedBid);

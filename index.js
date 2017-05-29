@@ -451,6 +451,16 @@ Registrar.prototype.finalizeAuction = function(name) {
     });
 }
 
+Registrar.prototype.getBidHash = function(name, address, bidAmount, salt) {
+    return this._getEns(name).then(function(result) {
+        var registrarContract = result.registrarContract;
+        var labelHash = result.labelHash;
+        return registrarContract.shaBid(labelHash, address, bidAmount, salt).then(function(result) {
+            return result.sealedBid;
+        });
+    });
+}
+
 Registrar.prototype._getBidHash = function(name, bidAmount, salt) {
     var addressPromise = this.signer.getAddress();
     if (!(addressPromise instanceof Promise)) {
@@ -563,7 +573,6 @@ Registrar.prototype.revealBid = function(name, bidAmount, salt) {
                     error.sealedBid = result.sealedBid;
                     return Promise.reject(error);
                 }
-                console.log(address, result.sealedBid, deedAddress);
                 return result;
             });
         });
