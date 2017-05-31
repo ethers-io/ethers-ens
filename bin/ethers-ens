@@ -612,7 +612,7 @@ switch (command) {
             if (opts.flags['check-password']) {
                 providerOrSigner.getAddress().then(function(address) {
                     console.log('Password OK!');
-                    console.log('Address: 0x' + address);
+                    console.log('Address: ' + address);
                     registrar.provider.getBalance(address).then(function(balance) {
                         console.log('Balance: ' + ethers.utils.formatEther(balance));
                     });
