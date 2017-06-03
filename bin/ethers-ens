@@ -148,6 +148,8 @@ try {
                     if (opts.flags.cheap) {
                         // 2.1 GWei
                         transaction.gasPrice = "0x7d2b7500";
+                        // 4.1 GWei
+                        //transaction.gasPrice = "0xf4610900";
                     }
                     return account.sendTransaction(transaction);
                 });
@@ -277,9 +279,11 @@ try {
 
         case 'set-resolver':
             ensureArgs(1, '"set-resolver" requires NAME');
+            /*
             if (!opts.options.resolver) {
                 opts.options.resolver = Registrar.config[provider.testnet ? 'testnet': 'mainnet'].publicResolver;
             }
+            */
             requireAccount();
             break;
 
@@ -1169,14 +1173,21 @@ switch (command) {
     case 'set-resolver':
         (function() {
             var name = opts.args.shift();
-            var resolver = opts.options.resolver;
+            var resolverPromise = null;
+            if (opts.options.resolver) {
+                resolverPromise = Promise.resolve(opts.options.resolver)
+            } else {
+                resolverPromise = provider.resolveName('resolver.eth');
+            }
             Promise.all([
                 getNameInfo(name),
-                registrar.signer.getAddress()
+                registrar.signer.getAddress(),
+                resolverPromise
             ]).then(function(result) {
                 if (result[0].owner !== result[1]) {
                     console.log('  Error: account does not own name');
                 } else {
+                    var resolver = result[2];
                     registrar.setResolver(name, resolver).then(function(result) {
                         addLog('setResolver', {
                             address: result.from,

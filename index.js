@@ -374,13 +374,13 @@ Registrar.config = {
         ensAddress: '0x314159265dd8dbb310642f98f50c066173c1259b',
 
         // https://etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
-        publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
+        //publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     },
     testnet: {
         ensAddress: '0x112234455c3a32fd11230c42e7bccd4a84e02010',
 
         // https://ropsten.etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
-        publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
+        //publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     }
 }
 
