@@ -1151,8 +1151,8 @@ switch (command) {
 
                 if (errors[result.state]) {
                     console.log('  Error: ' + errors[result.state]);
-                } else if (result.state === 'owned' && result.owner != '0x0000000000000000000000000000000000000000') {
-                    console.log('  Error: auction has already been finalized');
+//                } else if (result.state === 'owned' && result.owner != '0x0000000000000000000000000000000000000000') {
+//                    console.log('  Error: auction has already been finalized');
                 } else {
                     registrar.finalizeAuction(name).then(function(result) {
                         addLog('finalizeAuction', {
