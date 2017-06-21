@@ -61,17 +61,18 @@ function showHelp(error) {
     console.log('    ethers-ens set-subnode LABEL.NAME [--owner OWNER]');
     console.log('');
     console.log('Options');
-    console.log('    --help             Show this help screen');
+    console.log('    --account ACCOUNT  The JSON wallet to use');
     console.log('    --rpc NODE         Use the JSON-RPC node');
     console.log('    --testnet          Use the ropsten test network');
-    console.log('    --account ACCOUNT  The JSON wallet to use');
     console.log('    --check-password   Require the password to check JSON wallet');
-    console.log('    --extra            Send extra ether to mask the bid value');
-    console.log('    --salt             The salt to use (otherwise compute; recommended)');
-    console.log('    --secret           Use keccak256(secret) as the salt');
-    console.log('    --cheap            Use low (but safe) 2.1 GWei gas price');
+    console.log('    --extra EXTRA      Send extra ether to mask the bid value');
+    console.log('    --salt SALT        The salt to use (otherwise compute; recommended)');
+    console.log('    --secret SECRET    Use keccak256(secret) as the salt');
+    console.log('    --nonce NONCE      Override the nonce used in transactions');
+    console.log('    --gas-price PRICE  Set the gas price (in GWei)');
+    console.log('    --cheap            Use low (4.1 GWei) gas price');
     console.log('    --nolog            Do not log activity to ens-log.txt');
-    console.log('    --nonce            Override the nonce used in transactions');
+    console.log('    --help             Show this help screen');
     console.log('');
 
     if (error) {
@@ -90,6 +91,7 @@ try {
     var opts = getopts({
         account: '',
         extra: '',
+        'gas-price': '',
         nonce: '',
         owner: '',
         resolver: '',
@@ -129,9 +131,41 @@ try {
         opts.options.nonce = parseInt(opts.options.nonce);
     }
 
+    var gasPrice = null;
+
+    if (opts.options['gas-price']) {
+        if (opts.flags.cheap) {
+            throw new Error('cannot use --gas-price and --cheap together');
+        }
+
+        try {
+            // We will do some hackery to parse this; the units function will support this soon
+            gasPrice = ethers.utils.parseEther(opts.options['gas-price']);
+
+            // Make sure the bottom 9 digits are 0 (Gwei vs ether)
+            if (!gasPrice.mod(1000000000).isZero()) {
+                throw new Error('too many decimal places');
+            }
+
+            // Remove the bottom 9 zeros
+            gasPrice = gasPrice.div(1000000000);
+
+        } catch (error) {
+            throw new Error('invalid gas PRICE');
+        }
+
+    } else if (opts.flags.cheap) {
+         // 4.1 GWei
+         gasPrice = ethers.utils.bigNumberify("0xf4610900");
+    }
+
     // Read and decrpyt the wallet if an account is required
     function requireAccount() {
         if (!opts.options.account) { throw new Error(command + ' requires an account'); }
+
+        if (gasPrice) {
+            console.log('Gas Price: ' + ethers.utils.formatEther(gasPrice.mul(1000000000)) + ' GWei');
+        }
 
         // Decrypt the account and attach the provider
         var accountPromise = new Promise(function(resolve, reject) {
@@ -157,34 +191,14 @@ try {
             },
             sendTransaction: function(transaction) {
                 return accountPromise.then(function(account) {
-                    if (opts.flags.cheap) {
-                        // 2.1 GWei
-                        //transaction.gasPrice = "0x7d2b7500";
-                        // 4.1 GWei
-                        transaction.gasPrice = "0xf4610900";
-                        // 49.99999 GWei
-                        //transaction.gasPrice = "0xba43b4cf0";
-                        // 50 GWei
-                        //transaction.gasPrice = "0xba43b7400";
-                        // 51 GWei
-                        //transaction.gasPrice = "0xbdfd63e00";
-                        // 57.475936256 GWei
-                        //transaction.gasPrice = "0xd61d53000";
-                        // 67 GWei
-                        //transaction.gasPrice = "0xf9982de00";
-                        // 90 GWei
-                        //transaction.gasPrice = "0x14f46b0400";
-                        // 90 GWei + epsilon
-                        //transaction.gasPrice = "0x14f46b0401";
+                    if (gasPrice) {
+                        transaction.gasPrice = gasPrice;
                     }
 
                     if (transaction.nonce == null && opts.options.nonce) {
                         transaction.nonce = opts.options.nonce;
                     }
-                    //transaction.gasLimit = 500001;
 
-                    //console.log(transaction);
-                    console.log(transaction, account.sign(transaction));
                     return account.sendTransaction(transaction);
                 });
             },
