@@ -54,6 +54,9 @@ function showHelp(error) {
     console.log('    ethers-ens set-email NAME EMAIL');
     console.log('    ethers-ens set-publickey NAME PUBLICKEY');
     console.log('    ethers-ens set-url NAME URL');
+    console.log('    ethers-ens set-text NAME KEY VALUE');
+    console.log('');
+    console.log('    ethers-ens send ADDRESS AMOUNT'); // @TODO: add --gas-limit
     console.log('');
     console.log('    ethers-ens set-subnode LABEL.NAME [--owner OWNER]');
     console.log('');
@@ -68,6 +71,7 @@ function showHelp(error) {
     console.log('    --secret           Use keccak256(secret) as the salt');
     console.log('    --cheap            Use low (but safe) 2.1 GWei gas price');
     console.log('    --nolog            Do not log activity to ens-log.txt');
+    console.log('    --nonce            Override the nonce used in transactions');
     console.log('');
 
     if (error) {
@@ -86,6 +90,7 @@ try {
     var opts = getopts({
         account: '',
         extra: '',
+        nonce: '',
         owner: '',
         resolver: '',
         rpc: '',
@@ -117,6 +122,13 @@ try {
     }
     var providerOrSigner = provider;
 
+    if (opts.options.nonce) {
+        if (!opts.options.nonce.match(/^[0-9]+$/)) {
+            throw new Error('invalid NONCE');
+        }
+        opts.options.nonce = parseInt(opts.options.nonce);
+    }
+
     // Read and decrpyt the wallet if an account is required
     function requireAccount() {
         if (!opts.options.account) { throw new Error(command + ' requires an account'); }
@@ -147,10 +159,32 @@ try {
                 return accountPromise.then(function(account) {
                     if (opts.flags.cheap) {
                         // 2.1 GWei
-                        transaction.gasPrice = "0x7d2b7500";
+                        //transaction.gasPrice = "0x7d2b7500";
                         // 4.1 GWei
-                        //transaction.gasPrice = "0xf4610900";
+                        transaction.gasPrice = "0xf4610900";
+                        // 49.99999 GWei
+                        //transaction.gasPrice = "0xba43b4cf0";
+                        // 50 GWei
+                        //transaction.gasPrice = "0xba43b7400";
+                        // 51 GWei
+                        //transaction.gasPrice = "0xbdfd63e00";
+                        // 57.475936256 GWei
+                        //transaction.gasPrice = "0xd61d53000";
+                        // 67 GWei
+                        //transaction.gasPrice = "0xf9982de00";
+                        // 90 GWei
+                        //transaction.gasPrice = "0x14f46b0400";
+                        // 90 GWei + epsilon
+                        //transaction.gasPrice = "0x14f46b0401";
                     }
+
+                    if (transaction.nonce == null && opts.options.nonce) {
+                        transaction.nonce = opts.options.nonce;
+                    }
+                    //transaction.gasLimit = 500001;
+
+                    //console.log(transaction);
+                    console.log(transaction, account.sign(transaction));
                     return account.sendTransaction(transaction);
                 });
             },
@@ -277,6 +311,13 @@ try {
             requireAccount();
             break;
 
+        case 'send':
+            ensureArgs(2, '"send" requires ADDRESS and AMOUNT');
+            //checkAddress(0, ...)
+            parseEther(1, 'invalid AMOUNT')
+            requireAccount();
+            break;
+
         case 'set-resolver':
             ensureArgs(1, '"set-resolver" requires NAME');
             /*
@@ -304,6 +345,11 @@ try {
 
         case 'set-url':
             ensureArgs(2, '"set-url" requires NAME and URL');
+            requireAccount();
+            break;
+
+        case 'set-text':
+            ensureArgs(3, '"set-text" requires NAME, KEY and VALUE');
             requireAccount();
             break;
 
@@ -612,21 +658,28 @@ switch (command) {
                 console.log('Filename not found.');
                 process.exit(1);
             }
+
+            function showInfo(address) {
+                console.log('Address: ' + address);
+                Promise.all([
+                    registrar.provider.getBalance(address),
+                    registrar.provider.getTransactionCount(address, 'latest'),
+                    registrar.provider.getTransactionCount(address, 'pending'),
+                ]).then(function(result) {
+                    console.log('Balance:                     ' + ethers.utils.formatEther(result[0]));
+                    console.log('Transaction Count (latest):  ' + result[1]);
+                    console.log('Transaction Count (pending): ' + result[2]);
+                });
+            }
+
             var json = fs.readFileSync(filename);
             if (opts.flags['check-password']) {
                 providerOrSigner.getAddress().then(function(address) {
                     console.log('Password OK!');
-                    console.log('Address: ' + address);
-                    registrar.provider.getBalance(address).then(function(balance) {
-                        console.log('Balance: ' + ethers.utils.formatEther(balance));
-                    });
+                    showInfo(address);
                 });
             } else {
-                var address = ethers.utils.getAddress(JSON.parse(json).address);
-                console.log('Address: ' + address);
-                providerOrSigner.getBalance(address).then(function(balance) {
-                    console.log('Balance: ' + ethers.utils.formatEther(balance));
-                });
+                showInfo(ethers.utils.getAddress(JSON.parse(json).address));
             }
         })();
         break;
@@ -1169,7 +1222,20 @@ switch (command) {
         })();
         break;
 
-
+    case 'send':
+        (function() {
+            var address = opts.args.shift();
+            var amount = opts.args.shift();
+            providerOrSigner.sendTransaction({
+                to: address,
+                gasLimit: 21000,
+                value: amount
+            }).then(function(result) {
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+    
     case 'set-resolver':
         (function() {
             var name = opts.args.shift();
@@ -1243,15 +1309,22 @@ switch (command) {
 
     case 'set-email':
     case 'set-url':
+    case 'set-text':
         (function() {
             var name = opts.args.shift();
-            var textValue = opts.args.shift();
 
             var textKey = '';
+            var textValue = '';
+
             if (command === 'set-email') {
                 textKey = 'email';
+                textValue = opts.args.shift();
             } else if (command === 'set-url') {
                 textKey = 'url';
+                textValue = opts.args.shift();
+            } else if (command === 'set-text') {
+                textKey = opts.args.shift();
+                textValue = opts.args.shift();
             } else {
                 throw new Error('Do not enter');
             }
