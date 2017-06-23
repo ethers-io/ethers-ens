@@ -1148,7 +1148,6 @@ switch (command) {
                 var errors = {
                     'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
                     'open': 'name not up for auction yet; please "start" first',
-                    'owned': 'name already owned',
                     'forbidden': 'name forbidden',
                     'not-yet-available': ('name not available until ' + getHumanDate(result.startDate))
                 };
