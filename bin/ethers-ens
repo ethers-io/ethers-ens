@@ -1143,7 +1143,7 @@ switch (command) {
         (function() {
             var name = opts.args.shift();
             var bidAmount = opts.args.shift();
-            var salt = opts.flags.salt;
+            var salt = opts.options.salt;
             getNameInfo(name).then(function(result) {
                 var errors = {
                     'auction': ('name still up for auction; wait until ' + getHumanDate(result.revealDate)),
@@ -1160,17 +1160,18 @@ switch (command) {
                     if (!salt) {
 
                         // Get all matching salts
-                        var salts = [];
+                        var salts = {};
                         loadLog().forEach(function(operation) {
                             if (operation.command !== 'placeBid') { return; }
                             if (!bidAmount.eq(ethers.utils.parseEther(operation.bidAmount))) { return; }
                             if (operation.name != name) { return; }
-                            salts.push(operation.salt);
+                            salts[operation.salt] = true;
                         });
 
                         // If there is more than one matching salt, very bad things happend:
                         //   - Maybe they imported multiple bids with different salts
                         //   - Forced a salt with this tool multiple times
+                        salts = Object.keys(salts);
                         if (salts.length > 1) {
                             console.log('ERROR: Multiple salts found for bid! Reveal each MANUALLY with --salt.');
                             salts.forEach(function(salt) {
