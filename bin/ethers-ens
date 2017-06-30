@@ -58,6 +58,7 @@ function showHelp(error) {
     console.log('');
     console.log('    ethers-ens send ADDRESS AMOUNT'); // @TODO: add --gas-limit
     console.log('');
+    console.log('    ethers-ens set-owner NAME ADDRESS');
     console.log('    ethers-ens set-subnode LABEL.NAME [--owner OWNER]');
     console.log('');
     console.log('Options');
@@ -364,6 +365,11 @@ try {
 
         case 'set-text':
             ensureArgs(3, '"set-text" requires NAME, KEY and VALUE');
+            requireAccount();
+            break;
+
+        case 'set-owner':
+            ensureArgs(2, '"set-owner" requires NAME and ADDRESS');
             requireAccount();
             break;
 
@@ -1349,6 +1355,25 @@ switch (command) {
                     key: textKey,
                     text: textValue,
                     name: name,
+                    nodeHash: result.nodeHash,
+                    transactionHash: result.hash,
+                });
+                console.log('  Node Hash:            ' + result.nodeHash);
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+
+    case 'set-owner':
+        (function() {
+            var name = opts.args.shift();
+            var address = opts.args.shift();
+            console.log('owner', name, address);
+            registrar.setOwner(name, address).then(function(result) {
+                addLog('setOwner', {
+                    address: result.from,
+                    name: name,
+                    newOwner: address,
                     nodeHash: result.nodeHash,
                     transactionHash: result.hash,
                 });

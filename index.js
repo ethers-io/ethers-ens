@@ -24,6 +24,13 @@ var ensInterface = [
     {
         outputs: [ ],
         type: "function",
+        inputs : [ { name: "nodeHash", type: "bytes32" }, { name: "owner", type: "address" } ],
+        name: "setOwner",
+        constant: false
+    },
+    {
+        outputs: [ ],
+        type: "function",
         inputs : [
             { name: "node", type: "bytes32" },
             { name: "label", type: "bytes32" },
@@ -625,6 +632,25 @@ Registrar.prototype.getOwner = function(name) {
     var nodeHash = ethers.utils.namehash(name);
     return ensContract.owner(nodeHash).then(function(result) {
         return result.owner;
+    });
+}
+
+Registrar.prototype.setOwner = function(name, owner) {
+    if (!this.signer) { return Promise.reject(new Error('missing signer')); }
+
+    var options = {
+        gasLimit: 100000
+    };
+
+    var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, this.signer);
+    var nodeHash = ethers.utils.namehash(name);
+
+    return ensContract.setOwner(nodeHash, owner, options).then(function(transaction) {
+        transaction.name = name;
+        transaction.owner = owner;
+        transaction.nodeHash = nodeHash;
+
+        return transaction;
     });
 }
 
