@@ -292,6 +292,24 @@ var resolverInterface = [
     },
 ];
 
+var SimpleRegistrarInterface = [
+    {
+        constant: true,
+        inputs: [ ],
+        name: "fee",
+        outputs: [ { name: "fee", type: "uint256" } ],
+        type: "function"
+    },
+    {
+        constant: false,
+        inputs: [ { name: "label", type: "string" } ],
+        name: "register",
+        outputs: [ ],
+        payable: true,
+        type: "function"
+    },
+];
+
 
 function Registrar(providerOrSigner) {
     if (!(this instanceof Registrar)) { throw new Error('missing new'); }
@@ -320,7 +338,7 @@ function Registrar(providerOrSigner) {
 
     this.config = (this.provider.testnet ? Registrar.config.testnet: Registrar.config.mainnet);
 
-    this._ensPromise = {};
+    this._ensLookup = {};
 }
 
 Registrar.prototype._getEns = function(name) {
@@ -329,21 +347,15 @@ Registrar.prototype._getEns = function(name) {
 
     // Make sure it is a 2 component name
     if (comps.length !== 2) {
-        return Promise.reject('invalid name (must end have exactly 1 period)');
+        return Promise.reject('invalid name (must end have exactly 2 components)');
     }
 
     var label = comps[0];
     var tld = comps[1];
 
     // Make sure it is a supported tld
-    if (this.provider.testnet) {
-        if (tld != 'eth' && tld != 'test') {
-            return Promise.reject('invalid name (must end in .eth or .test)');
-        }
-    } else {
-        if (tld != 'eth') {
-            return Promise.reject('invalid name (must end in .eth)');
-        }
+    if (tld != 'eth') {
+        return Promise.reject('invalid name (must end in .eth)');
     }
 
     // Must be 7 characters or longer and contain only a-z, 0-0 and the hyphen (-)
@@ -352,23 +364,21 @@ Registrar.prototype._getEns = function(name) {
     }
 
     // A promise (cached) that holds the registrarContract for a given tld
-    var ensPromise = this._ensPromise[tld]
-    if (!ensPromise) {
-        var providerOrSigner = this.signer || this.provider;
-        var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, providerOrSigner);
+    var ownerPromise = this._ensLookup[tld];
+    if (!ownerPromise) {
+        var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, this.provider);
 
-        ensPromise = ensContract.owner(ethers.utils.namehash(tld)).then(function(result) {
-            return new ethers.Contract(
-                result.owner,
-                ((tld == 'test') ? registrarTestInterface: registrarInterface),
-                providerOrSigner
-            );
+        ownerPromise = ensContract.owner(ethers.utils.namehash(tld)).then(function(result) {
+            return result.owner;
         });
 
-        this._ensPromise[tld] = ensPromise;
+        this._ensLookup[tld] = ownerPromise;
     }
 
-    return ensPromise.then(function(registrarContract) {
+    var providerOrSigner = this.signer || this.provider;
+
+    return ownerPromise.then(function(owner) {
+        var registrarContract = new ethers.Contract(owner, registrarInterface, providerOrSigner );
         return {
             registrarContract: registrarContract,
             labelHash: ethers.utils.keccak256(ethers.utils.toUtf8Bytes(label))
@@ -379,15 +389,9 @@ Registrar.prototype._getEns = function(name) {
 Registrar.config = {
     mainnet: {
         ensAddress: '0x314159265dd8dbb310642f98f50c066173c1259b',
-
-        // https://etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
-        //publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     },
     testnet: {
         ensAddress: '0x112234455c3a32fd11230c42e7bccd4a84e02010',
-
-        // https://ropsten.etherscan.io/address/0x5ffc014343cd971b7eb70732021e26c35b744cc4
-        //publicResolver: '0x5ffc014343cd971b7eb70732021e26c35b744cc4'
     }
 }
 
@@ -666,7 +670,7 @@ Registrar.prototype.getDeedOwner = function(address) {
 Registrar.prototype._getResolver = function(name, interfaceId) {
     var signerOrProvider = this.signer || this.provider;
     return this.getResolver(name).then(function(resolverAddress) {
-        if (resolverAddress === ZeroAddress) { throw new Error('invalid resolver'); }
+        if (!resolverAddress) { throw new Error('invalid resolver'); }
         var resolverContract = new ethers.Contract(resolverAddress, resolverInterface, signerOrProvider);
         if (interfaceId) {
             return resolverContract.supportsInterface(interfaceId).then(function(result) {
@@ -795,6 +799,52 @@ Registrar.prototype.setSubnodeOwner = function(parentName, label, owner) {
         return result;
     });
 }
+
+/**
+ *  SimpleRegistrar Operations
+ *
+ *
+ *
+ */
+
+function SimpleRegistrar(address, registrar) {
+    this.provider = registrar.provider;
+    this.signer = registrar.signer;
+
+    var providerOrSigner = this.signer || this.provider;
+
+    this._simpleRegistrar = new ethers.Contract(address, SimpleRegistrarInterface, providerOrSigner);
+}
+
+SimpleRegistrar.prototype.getFee = function() {
+    return this._simpleRegistrar.fee().then(function(result) {
+        return result.fee;
+    });
+}
+
+SimpleRegistrar.prototype.register = function(label, value) {
+    var options = {
+        gasLimit: 250000,
+        value: (value || 0)
+    };
+
+    return this._simpleRegistrar.register(label, options).then(function(result) {
+        result.label = label;
+        return result;
+    });
+}
+
+Registrar.prototype.getSimpleRegistrar = function(name) {
+    var self = this;
+    return this.getAddress(name).then(function(address) {
+        if (!address) { return null; }
+        return new SimpleRegistrar(address, self);
+    });
+}
+
+/**
+ *  Event API (experimental)
+ */
 
 Registrar.prototype.on = function(event, callback) {
     this._getEns('nothing-important.eth').then(function(result) {

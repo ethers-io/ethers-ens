@@ -61,6 +61,8 @@ function showHelp(error) {
     console.log('    ethers-ens set-owner NAME ADDRESS');
     console.log('    ethers-ens set-subnode LABEL.NAME [--owner OWNER]');
     console.log('');
+    console.log('    ethers-ens register NAME [--extra EXTRA] [--registrar REGISTRAR]');
+    console.log('');
     console.log('Options');
     console.log('    --account ACCOUNT  The JSON wallet to use');
     console.log('    --rpc NODE         Use the JSON-RPC node');
@@ -95,6 +97,7 @@ try {
         'gas-price': '',
         nonce: '',
         owner: '',
+        registrar: '',
         resolver: '',
         rpc: '',
         salt: '',
@@ -168,30 +171,38 @@ try {
             console.log('Gas Price: ' + ethers.utils.formatEther(gasPrice.mul(1000000000)) + ' GWei');
         }
 
-        // Decrypt the account and attach the provider
-        var accountPromise = new Promise(function(resolve, reject) {
-            setTimeout(function() {
-                ethers.Wallet.fromEncryptedWallet(
-                    fs.readFileSync(opts.options.account),
-                    getPassword()
-                ).then(function(account) {
+        var data = fs.readFileSync(opts.options.account).toString();
+        var address = ethers.utils.getAddress(JSON.parse(data).address);
+
+        var accountPromise = null;
+
+        function getAccount() {
+            if (accountPromise) { return accountPromise; }
+
+            // Decrypt the account and attach the provider
+            accountPromise = new Promise(function(resolve, reject) {
+                ethers.Wallet.fromEncryptedWallet(data, getPassword()).then(function(account) {
                     account.provider = provider;
                     resolve(account);
                 }, function(error) {
                     reject(error);
                 });
-            }, 0);
-        });
+            });
+
+            return accountPromise;
+        }
 
         // Custom signer to defer operations until the account is decrypted
         providerOrSigner = {
             getAddress: function() {
-                return accountPromise.then(function(account) {
-                    return account.address;
-                });
+                return Promise.resolve(address);
             },
             sendTransaction: function(transaction) {
-                return accountPromise.then(function(account) {
+                return getAccount().then(function(account) {
+                    if (address !== account.address) {
+                        throw new Error('account mismatch!');
+                    }
+
                     if (gasPrice) {
                         transaction.gasPrice = gasPrice;
                     }
@@ -204,7 +215,11 @@ try {
                 });
             },
             getSalt: function(tag) {
-                return accountPromise.then(function(account) {
+                return getAccount().then(function(account) {
+                    if (address !== account.address) {
+                        throw new Error('account mismatch!');
+                    }
+
                     var salt = account.privateKey;
                     salt = ethers.utils.keccak256(salt);
                     salt = ethers.utils.concat([ethers.utils.toUtf8Bytes('salt'), salt]);
@@ -380,6 +395,36 @@ try {
             // If owner is specified, make sure it is a valid address
             if (opts.options.owner) {
                 ethers.utils.getAddress(opts.options.owner);
+            }
+
+            break;
+
+        case 'register':
+            ensureArgs(1, '"register" requires NAME');
+            requireAccount();
+
+            if (opts.options.extra) {
+                parseEther('extra', 'invalid EXTRA');
+            }
+
+            // Make sure it is a valid name
+            try {
+                ethers.utils.namehash(opts.args[0]);
+            } catch (error) {
+                console.log(error);
+                throw new Error('invalid name');
+            }
+
+            var comps = opts.args[0].split('.');
+
+            // Get the label to register
+            opts.args[0] = comps.shift();
+
+            // If no specified registrar, guess (registrar.NAME)
+            if (!opts.options.registrar) {
+                opts.options.registrar = 'registrar.' + comps.join('.');
+            } else if (comps.length < 2) {
+                throw new Error('invalid NAME');
             }
 
             break;
@@ -1414,6 +1459,37 @@ switch (command) {
                     console.log('  Node Hash:            ' + result.nodeHash);
                     console.log('  Transaction Hash:     ' + result.hash);
                 });
+            });
+        })();
+        break;
+
+    case 'register':
+        (function() {
+            var label = opts.args.shift();
+            var extra = opts.options.extra || 0;
+            registrar.getSimpleRegistrar(opts.options.registrar).then(function(simpleRegistrar) {
+                if (!simpleRegistrar) {
+                    console.log('  Error: ' + opts.options.registrar + ' is not a simple registrar');
+                } else {
+                    simpleRegistrar.getFee().then(function(fee) {
+                        var value = fee.add(extra);
+
+                        console.log('Registrar: ' + opts.options.registrar);
+                        console.log('Fee:       ' + ethers.utils.formatEther(fee));
+                        if (!fee.eq(value)) {
+                            console.log('Total:     ' + ethers.utils.formatEther(value));
+                        }
+                        simpleRegistrar.register(label, value).then(function(result) {
+                            addLog('register', {
+                                address: result.from,
+                                label: result.label,
+                                registrar: opts.options.registrar,
+                                transactionHash: result.hash,
+                            });
+                            console.log('  Transaction Hash:     ' + result.hash);
+                        });
+                    });
+                }
             });
         })();
         break;
