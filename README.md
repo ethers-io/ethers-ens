@@ -48,20 +48,28 @@ Usage:
     ethers-ens set-email NAME EMAIL
     ethers-ens set-publickey NAME KEY
     ethers-ens set-url NAME URL
+    ethers-ens set-text NAME KEY VALUE
 
-    ethers-ens set-subnode LABEL.NAME [--owner OWNER]
+    ethers-ens send ADDRESS AMOUNT
+    
+    ethers-ens set-owner NAME ADDRESS
+    ethers-ens set-subnode LABEL.NAME [--owner ADDRESS]
+
+    ethers-ens register NAME [--extrsa AMOUNT] [--registrar ADDRESS]
 
 Options
-    --help             Show this help screen
+    --account ACCOUNT  The JSON wallet to use
     --rpc NODE         Use the JSON-RPC node
     --testnet          Use the ropsten test network
-    --account ACCOUNT  The JSON wallet to use
     --check-password   Require the password to check JSON wallet
-    --extra            Send extra ether to mask the bid value
-    --salt             The salt to use (otherwise compute; recommended)
-    --secret           Use keccak256(secret) as the salt
-    --cheap            Use low (but safe) 2.1 GWei gas price
+    --extra AMOUNT     Send extra ether to mask the bid value
+    --salt SALT        The salt to use (otherwise compute; recommended)
+    --secret SECRET    Use keccak256(secret) as the salt
+    --nonce NONCE      Override the nonce used in the transaction
+    --gas-price PRICE  Set the gas price (in GWei)
+    --cheap            Use low (but safe) 4.1 GWei gas price
     --nolog            Do not log activity to ens-log.txt
+    --help             Show this help screen
 ```
 
 
