@@ -232,6 +232,15 @@ var resolverInterface = [
         outputs: [ { name: "addr", type: "address" } ]
     },
     {
+        name: "name",
+        constant: true,
+        inputs: [ { name: "nodeHash", type: "bytes32" } ],
+        type: "function",
+        outputs: [
+            { name: "name", type: "string" }
+        ]
+    },
+    {
         name: "pubkey",
         constant: true,
         inputs: [ { name: "nodeHash", type: "bytes32" } ],
@@ -247,6 +256,16 @@ var resolverInterface = [
         inputs: [
             { name: "nodeHash", type: "bytes32" },
             { name: "addr", type: "address" }
+        ],
+        type: "function",
+        outputs: [ ]
+    },
+    {
+        name: "setName",
+        constant: false,
+        inputs: [
+            { name: "nodeHash", type: "bytes32" },
+            { name: "name", type: "string" }
         ],
         type: "function",
         outputs: [ ]
@@ -292,6 +311,18 @@ var resolverInterface = [
     },
 ];
 
+var reverseRegistrarInterface = [
+    {
+        name: "setName",
+        constant: false,
+        inputs: [
+            { name: "name", type: "string" }
+        ],
+        type: "function",
+        outputs: [ { name: "node", type: "bytes32" } ]
+    },
+];
+
 var SimpleRegistrarInterface = [
     {
         constant: true,
@@ -309,6 +340,7 @@ var SimpleRegistrarInterface = [
         type: "function"
     },
 ];
+
 
 
 function Registrar(providerOrSigner) {
@@ -442,7 +474,7 @@ Registrar.prototype.startAuction = function(name) {
         gasLimit: 300000
     };
     return this._getEns(name).then(function(results) {
-        return results.registrarContract.startAuction(results.labelHash).then(function(transaction) {
+        return results.registrarContract.startAuction(results.labelHash, options).then(function(transaction) {
             transaction.labelHash = results.labelHash;
             return transaction;
         });
@@ -667,6 +699,43 @@ Registrar.prototype.getDeedOwner = function(address) {
     });
 }
 
+Registrar.prototype.setReverseName = function(name) {
+    if (!this.signer) { return Promise.reject(new Error('missing signer')); }
+
+    var options = {
+        gasLimit: 100000
+    };
+
+    var self = this;
+
+    var ensContract = new ethers.Contract(this.config.ensAddress, ensInterface, this.signer);
+    return ensContract.owner(ethers.utils.namehash('addr.reverse')).then(function(result) {
+        return new ethers.Contract(result.owner, reverseRegistrarInterface, self.signer);
+    }).then(function(reverseRegistrarContract) {
+        return reverseRegistrarContract.setName(name);
+    });
+}
+
+Registrar.prototype.lookupAddress = function(address) {
+    var name = address.substring(2) + '.addr.reverse';
+    var self = this;
+
+    return this.getResolver(name).then(function(resolverAddress) {
+        if (!resolverAddress) { return null; }
+
+        var resolverContract = new ethers.Contract(resolverAddress, resolverInterface, self.provider);
+        return resolverContract.name(ethers.utils.namehash(name)).then(function(result) {
+            return result.name;
+
+        }).then(function(name) {
+            return self.getAddress(name).then(function(realAddress) {
+                if (realAddress != address) { return null; }
+                return name;
+            });
+        });
+    });
+}
+
 Registrar.prototype._getResolver = function(name, interfaceId) {
     var signerOrProvider = this.signer || this.provider;
     return this.getResolver(name).then(function(resolverAddress) {
@@ -683,8 +752,9 @@ Registrar.prototype._getResolver = function(name, interfaceId) {
 }
 
 var InterfaceIdAddr = '0x3b3b57de';
-var InterfaceIdText = '0x59d1d43c';
+var InterfaceIdName = '0x691f3431';
 var InterfaceIdPubkey = '0xc8690233';
+var InterfaceIdText = '0x59d1d43c';
 
 Registrar.prototype.setAddress = function(name, addr) {
     var options = {
@@ -713,6 +783,23 @@ Registrar.prototype.getAddress = function(name) {
         });
     }, function(error) {
         return null;
+    });
+}
+
+Registrar.prototype.setName = function(address, name) {
+    var options = {
+        gasLimit: 150000
+    };
+    var ensName = (ethers.utils.getAddress(address).substring(2) + '.addr.reverse').toLowerCase()
+    var nodeHash = ethers.utils.namehash(ensName);
+    return this._getResolver(ensName, InterfaceIdName).then(function(resolverContract) {
+        return resolverContract.setName(nodeHash, name, options).then(function(transaction) {
+            transaction.addr = address;
+            transaction.name = name;
+            transaction.nodeHash = nodeHash;
+            transaction.resolver = resolverContract.address;
+            return transaction;
+        });
     });
 }
 
@@ -789,8 +876,11 @@ Registrar.prototype.setSubnodeOwner = function(parentName, label, owner) {
 
     // @TODO: Check first that the nodeHash is owned by the signer
     // @TODO: Check the nodeHash exists
+    var options = {
+        gasLimit: 85000
+    };
 
-    return ensContract.setSubnodeOwner(nodeHash, labelHash, owner).then(function(result) {
+    return ensContract.setSubnodeOwner(nodeHash, labelHash, owner, options).then(function(result) {
         result.labelHash = labelHash;
         result.label = label;
         result.nodeHash = nodeHash;

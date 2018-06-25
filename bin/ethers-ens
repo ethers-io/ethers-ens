@@ -24,7 +24,16 @@ function isValidHashRegistrarName(name) {
 }
 
 function isValidName(name) {
-    return !!(name.match(/^[a-zA-Z0-9_.-]+\.eth$/));
+    return !!(name.match(/^[a-zA-Z0-9_.-]+\.(?:eth|addr\.reverse)$/));
+}
+
+function isValidAddress(address) {
+    try {
+        ethers.utils.getAddress(address);
+    } catch (error) {
+        return false;
+    }
+    return true;
 }
 
 function showHelp(error) {
@@ -55,6 +64,8 @@ function showHelp(error) {
     console.log('    ethers-ens set-publickey NAME PUBLICKEY');
     console.log('    ethers-ens set-url NAME URL');
     console.log('    ethers-ens set-text NAME KEY VALUE');
+    console.log('');
+    console.log('    ethers-ens set-reverse NAME');
     console.log('');
     console.log('    ethers-ens send ADDRESS AMOUNT'); // @TODO: add --gas-limit
     console.log('');
@@ -197,7 +208,16 @@ try {
             getAddress: function() {
                 return Promise.resolve(address);
             },
+            signMessage: function(message) {
+                return getAccount().then(function(account) {
+                    if (address !== account.address) {
+                        throw new Error('account mismatch!');
+                    }
+                    return account.signMessage(message);
+                });
+            },
             sendTransaction: function(transaction) {
+                console.log(transaction);
                 return getAccount().then(function(account) {
                     if (address !== account.address) {
                         throw new Error('account mismatch!');
@@ -294,6 +314,11 @@ try {
         case 'scan-log':
             break;
 
+        case 'sign':
+            ensureArgs(1, '"sign" requires NAME');
+            requireAccount();
+            break;
+
         case 'watch':
             if (opts.args.length === 0) {
                 throw new Error('"watch" requires NAME [ NAME ... ]');
@@ -358,8 +383,18 @@ try {
             requireAccount();
             break;
 
+        case 'set-reverse':
+            ensureArgs(1, '"set-reverse" requires NAME');
+            requireAccount();
+            break;
+
         case 'set-address':
             ensureArgs(2, '"set-address" requires NAME and ADDRESS');
+            requireAccount();
+            break;
+
+        case 'set-name':
+            ensureArgs(2, '"set-name" requires NAME and ADDRESS');
             requireAccount();
             break;
 
@@ -754,11 +789,21 @@ switch (command) {
         (function() {
             var namePromises = [];
             opts.args.forEach(function(name) {
-                if (!isValidName(name)) {
+                if (isValidName(name)) {
+                    namePromises.push(getNameInfo(name, true));
+                } else if (isValidAddress(name)) {
+                    var address = ethers.utils.getAddress(name);
+                    var promise = registrar.lookupAddress(address).then(function(name) {
+                        if (name) {
+                            return getNameInfo(name, true);
+                        } else {
+                            return { name: address };
+                        }
+                    });
+                    namePromises.push(promise);
+                } else {
                     console.log('Invalid ENS Name: ' + name);
-                    return;
                 }
-                namePromises.push(getNameInfo(name, true));
             });
 
             Promise.all(namePromises).then(function(results) {
@@ -1026,7 +1071,21 @@ switch (command) {
 
         })();
         break;
-
+/*
+    case 'sign':
+        (function() {
+            console.log('foo');
+            var filename = opts.args.shift();
+            var data = fs.readFileSync(filename).toString();
+            return registrar.signer.signMessage(data).then(function(signature) {
+                console.log({
+                    data: data,
+                    signature: signature
+                });
+            });
+        })();
+        break;
+*/
     case 'watch':
         (function() {
             var getInfoPromises = [];
@@ -1335,12 +1394,41 @@ switch (command) {
         })();
         break;
 
+    case 'set-reverse':
+        (function() {
+            var name = opts.args.shift();
+            registrar.setReverseName(name).then(function(result) {
+                console.log(result);
+            });
+        })();
+        break;
+
     case 'set-address':
         (function() {
             var name = opts.args.shift();
             var address = opts.args.shift();
             registrar.setAddress(name, address).then(function(result) {
                 addLog('setAddress', {
+                    address: result.from,
+                    addr: result.addr,
+                    name: name,
+                    nodeHash: result.nodeHash,
+                    resolver: result.resolver,
+                    transactionHash: result.hash,
+                });
+                console.log('  Node Hash:            ' + result.nodeHash);
+                console.log('  Transaction Hash:     ' + result.hash);
+            });
+        })();
+        break;
+
+    case 'set-name':
+        (function() {
+            console.log("@TODO: allow optional --address");
+            var name = opts.args.shift();
+            var address = opts.args.shift();
+            registrar.setName(address, name).then(function(result) {
+                addLog('setName', {
                     address: result.from,
                     addr: result.addr,
                     name: name,
