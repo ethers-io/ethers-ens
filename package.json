@@ -1,13 +1,13 @@
 {
   "name": "ethers-ens",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Library and command-line interface for Ethereum ENS.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bin": {
-    "ethers-ens": "./bin/ethers-ens"
+    "ethers-ens": "./bin/ethers-ens.js"
   },
   "keywords": [
     "ethereum",
@@ -28,6 +28,5 @@
     "type": "git",
     "url": "git://github.com/ethers-io/ethers-ens.git"
   },
-
   "license": "MIT"
 }
