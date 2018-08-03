@@ -241,6 +241,16 @@ var resolverInterface = [
         ]
     },
     {
+        name: "ABI",
+        constant: true,
+        inputs: [ { name: "nodeHash", type: "bytes32" }, { name: 'contentTypes', type: 'uint256'} ],
+        type: "function",
+        outputs: [
+            { name: "contentType", type: "uint256" },
+            { name: "data", type: "bytes" }
+        ]
+    },
+    {
         name: "pubkey",
         constant: true,
         inputs: [ { name: "nodeHash", type: "bytes32" } ],
@@ -266,6 +276,17 @@ var resolverInterface = [
         inputs: [
             { name: "nodeHash", type: "bytes32" },
             { name: "name", type: "string" }
+        ],
+        type: "function",
+        outputs: [ ]
+    },
+    {
+        name: "setABI",
+        constant: false,
+        inputs: [
+            { name: "nodeHash", type: "bytes32" },
+            { name: 'contentType', type: 'uint256'},
+            { name: 'data', type: 'bytes' }
         ],
         type: "function",
         outputs: [ ]
@@ -755,6 +776,7 @@ var InterfaceIdAddr = '0x3b3b57de';
 var InterfaceIdName = '0x691f3431';
 var InterfaceIdPubkey = '0xc8690233';
 var InterfaceIdText = '0x59d1d43c';
+var InterfaceIdAbi = '0x2203ab56'
 
 Registrar.prototype.setAddress = function(name, addr) {
     var options = {
@@ -859,6 +881,45 @@ Registrar.prototype.getText = function(name, key) {
     return this._getResolver(name).then(function(resolverContract) {
         return resolverContract.text(nodeHash, key).then(function(result) {
             return result.text;
+        }, function (error) {
+            return null;
+        });
+    }, function(error) {
+        return null;
+    });
+}
+
+Registrar.ABIEncodings = {
+    JSON:     1,
+    zlibJSON: 2,
+    CBOR:     4,
+    URI:      8,
+};
+
+Registrar.prototype.setAbi = function(name, abi) {
+    var nodeHash = ethers.utils.namehash(name);
+
+    return this._getResolver(name, InterfaceIdAbi).then(function(resolverContract) {
+        return resolverContract.setABI(nodeHash, Registrar.ABIEncoding.JSON, ethers.utils.toUtf8Bytes(abi)).then(function(tx) {
+            tx.encoding = Registrar.ABIEncoding.JSON;
+            tx.name = name;
+            tx.nodeHash = nodeHash;
+            tx.resolver = resolverContract.address;
+            tx.abi = abi;
+            return transaction;
+        });
+    });
+}
+
+Registrar.prototype.getAbi = function(name) {
+    var nodeHash = ethers.utils.namehash(name);
+    return this._getResolver(name).then(function(resolverContract) {
+        return resolverContract.ABI(nodeHash, Registrar.ABIEncoding.JSON).then(function(result) {
+            if (result.contentType === 0) {
+                // @TODO: fallback onto the address record
+                return null;
+            }
+            return ethers.utils.toUtf8String(result.data);
         }, function (error) {
             return null;
         });
