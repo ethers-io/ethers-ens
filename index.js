@@ -218,7 +218,7 @@ var ENS = /** @class */ (function () {
         });
     };
     ENS.prototype.getAuction = function (name) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var _a, labelHash, registrar, auction;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -241,7 +241,7 @@ var ENS = /** @class */ (function () {
         });
     };
     ENS.prototype.startAuction = function (name) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var _a, labelHash, registrar, auction, errorMessages, errorMessage, tx;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -280,7 +280,7 @@ var ENS = /** @class */ (function () {
         });
     };
     ENS.prototype.finalizeAuction = function (name) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var auction, errorMessages, errorMessage, deedOwner, signerAddress, _a, labelHash, registrar, tx;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -332,7 +332,7 @@ var ENS = /** @class */ (function () {
         });
     };
     ENS.prototype.getBidHash = function (name, address, bidAmount, salt) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var _a, labelHash, registrar, sealedBid;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -376,7 +376,7 @@ var ENS = /** @class */ (function () {
         });
     };
     ENS.prototype.placeBid = function (name, amount, salt, extraAmount) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var auction, errorMessages, errorMessage, bidAmount, bid, options, tx;
             return __generator(this, function (_a) {
                 switch (_a.label) {
@@ -559,7 +559,7 @@ var ENS = /** @class */ (function () {
         return this.provider.resolveName(name);
     };
     ENS.prototype.setReverseName = function (name) {
-        return __awaiter(this, void 0, Promise, function () {
+        return __awaiter(this, void 0, void 0, function () {
             var ens, owner, reverseRegistrar, tx;
             return __generator(this, function (_a) {
                 switch (_a.label) {
