@@ -1,26 +1,27 @@
 ethers-ens
 ==========
 
-A simple library and command-line interface to manage Ethereum Name Service (ENS) auctions,
+A simple library for managing Ethereum Name Service (ENS) auctions,
 resolvers and associated date.
-
-**NOTE:** This tool should be considered highly experimental.
-
-
-Practice Practice Practice!
----------------------------
-
-Try this out on **testnet** first, until you are comfortable using the tool and are
-confident you won't forget to reveal.
 
 
 Installing
 ----------
 
+**node.js**
+
 ```
-/Users/ethers> sudo npm install -g ethers-ens
+/Users/ethers> sudo npm install ethers-ens
 ```
 
+**Browser**
+
+```
+<!-- The ethers.js library MUST be loaded first -->
+<script src="https://cdn.ethers.io/scripts/ethers-v4.min.js"
+<script src="https://cdn.ethers.io/scripts/ethers-ens-v1.0.min.js"
+<!-- This exposes the ENS class as ethers.ENS -->
+```
 
 Command-Line Interface
 ----------------------

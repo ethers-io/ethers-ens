@@ -1,8 +1,10 @@
 'use strict';
 
-import { constants, Contract, errors, Signer, utils } from 'ethers';
-import { Provider, TransactionResponse } from 'ethers/providers';
-import { Arrayish, BigNumber, BigNumberish, Interface } from 'ethers/utils';
+import { ethers } from 'ethers';
+
+const errors = ethers.errors;
+const constants = ethers.constants;
+const utils = ethers.utils;
 
 const ensInterface = [
     "function owner(bytes32 nodeHash) constant returns (address owner)",
@@ -127,12 +129,12 @@ export function getDateTimer(timestamp: Date): string {
 }
 
 export const interfaces = {
-    ens: new Interface(ensInterface),
-    testRegistrar: new Interface(testRegistrarInterface),
-    hashRegistrar: new Interface(hashRegistrarInterface),
-    reverseRegistrar: new Interface(reverseRegistrarInterface),
-    simpleRegistrar: new Interface(simpleRegistrarInterface),
-    resolver: new Interface(resolverInterface),
+    ens: new utils.Interface(ensInterface),
+    testRegistrar: new utils.Interface(testRegistrarInterface),
+    hashRegistrar: new utils.Interface(hashRegistrarInterface),
+    reverseRegistrar: new utils.Interface(reverseRegistrarInterface),
+    simpleRegistrar: new utils.Interface(simpleRegistrarInterface),
+    resolver: new utils.Interface(resolverInterface),
 }
 Object.freeze(interfaces);
 
@@ -148,17 +150,17 @@ export interface Auction {
     winningDeed: string
     endDate: Date;
     revealDate: Date;
-    value: BigNumber;
-    highestBid: BigNumber;
+    value: ethers.utils.BigNumber;
+    highestBid: ethers.utils.BigNumber;
 }
 
-export interface ENSTransactionResponse extends TransactionResponse {
+export interface ENSTransactionResponse extends ethers.providers.TransactionResponse {
     metadata: { [key: string]: any };
 }
 
 interface Bid {
     address: string,
-    bidAmount: BigNumber;
+    bidAmount: ethers.utils.BigNumber;
     salt: string;
     sealedBid: string;
     registrar: HashRegistrarContract;
@@ -168,11 +170,11 @@ interface Bid {
 
 interface EnsContract {
     address: string;
-    connect(signer: Signer): EnsContract;
+    connect(signer: ethers.Signer): EnsContract;
 
     owner(nodeHash: string): Promise<string>;
     resolver(nodeHash: string): Promise<string>;
-    ttl(nodeHash: string): Promise<BigNumber>
+    ttl(nodeHash: string): Promise<ethers.utils.BigNumber>
 
     setOwner(nodeHash: string, owner: string): Promise<ENSTransactionResponse>;
     setSubnodeOwner(node: string, label: string, owner: string): Promise<ENSTransactionResponse>;
@@ -181,7 +183,7 @@ interface EnsContract {
 
 interface ResolverContract {
     address: string;
-    connect(signer: Signer): ResolverContract;
+    connect(signer: ethers.Signer): ResolverContract;
 
     supportsInterface(interfaceId: string): Promise<boolean>;
 
@@ -203,15 +205,15 @@ interface ResolverContract {
 
 interface HashRegistrarContract {
     address: string;
-    connect(signer: Signer): HashRegistrarContract;
+    connect(signer: ethers.Signer): HashRegistrarContract;
 
-    entries(labelHash: string): Promise<{ state: number, winningDeed: string, endDate: BigNumber, value: BigNumber, highestBid: BigNumber}>;
-    getAllowedTime(labelHash: string): Promise<BigNumber>;
-    shaBid(labelHash: string, owner: string, bidAmount: BigNumberish, salt: Arrayish): Promise<string>;
+    entries(labelHash: string): Promise<{ state: number, winningDeed: string, endDate: ethers.utils.BigNumber, value: ethers.utils.BigNumber, highestBid: ethers.utils.BigNumber}>;
+    getAllowedTime(labelHash: string): Promise<ethers.utils.BigNumber>;
+    shaBid(labelHash: string, owner: string, bidAmount: ethers.utils.BigNumberish, salt: ethers.utils.Arrayish): Promise<string>;
 
     startAuction(labelHash: string): Promise<ENSTransactionResponse>;
-    newBid(sealedBid: string, options?: { value: BigNumberish }): Promise<ENSTransactionResponse>;
-    unsealBid(labelHash: string, bidAmount: BigNumberish, salt: Arrayish): Promise<ENSTransactionResponse>;
+    newBid(sealedBid: string, options?: { value: ethers.utils.BigNumberish }): Promise<ENSTransactionResponse>;
+    unsealBid(labelHash: string, bidAmount: ethers.utils.BigNumberish, salt: ethers.utils.Arrayish): Promise<ENSTransactionResponse>;
     finalizeAuction(labelHash: string): Promise<ENSTransactionResponse>;
 }
 
@@ -219,7 +221,7 @@ interface ReverseRegistrarContract {
     setName(name: string): Promise<ENSTransactionResponse>;
 }
 
-function uintify(value: BigNumberish): string {
+function uintify(value: ethers.utils.BigNumberish): string {
     return utils.hexZeroPad(utils.bigNumberify(value).toHexString(), 32);
 }
 
@@ -236,22 +238,22 @@ const interfaceIds = {
 }
 
 export class ENS {
-    readonly provider: Provider;
-    readonly signer: Signer;
+    readonly provider: ethers.providers.Provider;
+    readonly signer: ethers.Signer;
 
     private _ens: Promise<EnsContract> = null;
     private _hashRegistrar: Promise<HashRegistrarContract> = null;
 
-    constructor(providerOrSigner: Provider | Signer) {
+    constructor(providerOrSigner: ethers.providers.Provider | ethers.Signer) {
         errors.checkNew(this, ENS);
 
         this.provider = null;
         this.signer = null;
 
-        if (Provider.isProvider(providerOrSigner)) {
+        if (ethers.providers.Provider.isProvider(providerOrSigner)) {
              utils.defineReadOnly(this, 'provider', providerOrSigner);
 
-        } else if (Signer.isSigner(providerOrSigner)) {
+        } else if (ethers.Signer.isSigner(providerOrSigner)) {
             if (!providerOrSigner.provider) {
                 errors.throwError('signer is missing provider', errors.INVALID_ARGUMENT, {
                     argument: 'providerOrSigner',
@@ -366,13 +368,13 @@ export class ENS {
         return tx;
     }
 
-    async getBidHash(name: string, address: string, bidAmount: BigNumber, salt: Arrayish): Promise<string> {
+    async getBidHash(name: string, address: string, bidAmount: ethers.utils.BigNumber, salt: ethers.utils.Arrayish): Promise<string> {
         let { labelHash, registrar } = await this._getHashRegistrar(name);
         let sealedBid = await registrar.shaBid(labelHash, address, bidAmount, salt);
         return sealedBid;
     }
 
-    _getBid(name: string, bidAmount: BigNumber, salt: Arrayish): Promise<Bid> {
+    _getBid(name: string, bidAmount: ethers.utils.BigNumber, salt: ethers.utils.Arrayish): Promise<Bid> {
         if (!this.signer) { return Promise.reject(new Error('no signer')); }
 
         if (!salt || utils.arrayify(salt).length !== 32) {
@@ -399,7 +401,7 @@ export class ENS {
         });
     }
 
-    async placeBid(name: string, amount: BigNumberish, salt: Arrayish, extraAmount?: BigNumberish): Promise<ENSTransactionResponse> {
+    async placeBid(name: string, amount: ethers.utils.BigNumberish, salt: ethers.utils.Arrayish, extraAmount?: ethers.utils.BigNumberish): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('no signer')); }
 
         let auction = await this.getAuction(name);
@@ -459,7 +461,7 @@ export class ENS {
     }
 
 
-    revealBid(name: string, bidAmount: BigNumberish, salt: Arrayish): Promise<ENSTransactionResponse> {
+    revealBid(name: string, bidAmount: ethers.utils.BigNumberish, salt: ethers.utils.Arrayish): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('no signer')); }
 
         let bid = utils.bigNumberify(bidAmount);
@@ -496,8 +498,8 @@ export class ENS {
     setSubnodeOwner(parentName: string, label: string, owner: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('no signer')); }
 
-        var nodeHash = utils.namehash(parentName);
-        var labelHash = utils.keccak256(utils.toUtf8Bytes(label));
+        let nodeHash = utils.namehash(parentName);
+        let labelHash = utils.keccak256(utils.toUtf8Bytes(label));
 
         return this._getEns().then((ens) => {
             return ens.connect(this.signer).setSubnodeOwner(nodeHash, labelHash, owner).then((tx) => {
@@ -548,7 +550,7 @@ export class ENS {
     setOwner(name: string, owner: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('missing signer')); }
 
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
 
         return this._getEns().then((ens) => {
             return ens.connect(this.signer).setOwner(nodeHash, owner).then((tx) => {
@@ -563,7 +565,7 @@ export class ENS {
     }
 
     getDeedOwner(address: string): Promise<string> {
-        var deedContract = new Contract(address, deedInterface, this.provider);
+        let deedContract = new ethers.Contract(address, deedInterface, this.provider);
         return deedContract.functions.owner().then((owner) => {
             return owner;
         }, function (error) {
@@ -585,7 +587,7 @@ export class ENS {
         let ens = await this._getEns();
 
         let owner = await ens.owner(utils.namehash('addr.reverse'));
-        let reverseRegistrar: any = new Contract(owner, interfaces.reverseRegistrar, this.signer);
+        let reverseRegistrar: any = new ethers.Contract(owner, interfaces.reverseRegistrar, this.signer);
 
         let tx = await (<ReverseRegistrarContract>reverseRegistrar).setName(name);
         tx.metadata = { }
@@ -630,7 +632,7 @@ export class ENS {
     setAddress(name: string, addr: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('missing signer')); }
 
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
         return this._getResolver(name, interfaceIds.addr).then((resolver) => {
             return resolver.connect(this.signer).setAddr(nodeHash, addr).then((tx) => {
                 tx.metadata = {
@@ -645,7 +647,7 @@ export class ENS {
     }
 
     getAddress(name: string): Promise<string> {
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
         return this._getResolver(name).then(function(resolver) {
             return resolver.addr(nodeHash).then(function(addr) {
                 if (addr === constants.AddressZero) { return null; }
@@ -661,8 +663,8 @@ export class ENS {
     setName(address: string, name: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('missing signer')); }
 
-        var ensName = (utils.getAddress(address).substring(2) + '.addr.reverse').toLowerCase()
-        var nodeHash = utils.namehash(ensName);
+        let ensName = (utils.getAddress(address).substring(2) + '.addr.reverse').toLowerCase()
+        let nodeHash = utils.namehash(ensName);
         return this._getResolver(ensName, interfaceIds.name).then((resolver) => {
             return resolver.connect(this.signer).setName(nodeHash, name).then((tx) => {
                 tx.metadata = {
@@ -679,13 +681,13 @@ export class ENS {
     setPublicKey(name: string, publicKey: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('missing signer')); }
 
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
 
         // Make sure the key is uncompressed, and strip the '0x04' prefix
         publicKey = utils.computePublicKey(publicKey, false).substring(4);
 
-        var x = '0x' + publicKey.substring(0, 64);
-        var y = '0x' + publicKey.substring(64, 128);
+        let x = '0x' + publicKey.substring(0, 64);
+        let y = '0x' + publicKey.substring(64, 128);
 
         return this._getResolver(name, interfaceIds.pubkey).then((resolver) => {
             return resolver.connect(this.signer).setPubkey(nodeHash, x, y).then((tx) => {
@@ -701,7 +703,7 @@ export class ENS {
     }
 
     getPublicKey(name: string, compressed?: boolean): Promise<string> {
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
         return this._getResolver(name).then(function(resolverContract) {
             return resolverContract.pubkey(nodeHash).then(function(result) {
                 if (result.x === constants.HashZero && result.y === constants.HashZero) {
@@ -719,7 +721,7 @@ export class ENS {
     setText(name: string, key: string, value: string): Promise<ENSTransactionResponse> {
         if (!this.signer) { return Promise.reject(new Error('missing signer')); }
 
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
 
         return this._getResolver(name, interfaceIds.text).then((resolver) => {
             return resolver.connect(this.signer).setText(nodeHash, key, value).then((tx) => {
@@ -736,7 +738,7 @@ export class ENS {
     }
 
     getText(name: string, key: string): Promise<string> {
-        var nodeHash = utils.namehash(name);
+        let nodeHash = utils.namehash(name);
         return this._getResolver(name).then((resolver) => {
             return resolver.text(nodeHash, key).then((text) => {
                 return text;
@@ -751,7 +753,7 @@ export class ENS {
     _getResolver(name: string, interfaceId?: string): Promise<ResolverContract> {
         return this.getResolver(name).then((resolverAddress) => {
             if (!resolverAddress) { throw new Error('invalid resolver'); }
-            let resolverContract: any = new Contract(resolverAddress, interfaces.resolver, this.provider);
+            let resolverContract: any = new ethers.Contract(resolverAddress, interfaces.resolver, this.provider);
             let resolver = (<ResolverContract>resolverContract);
             if (interfaceId) {
                 return resolver.supportsInterface(interfaceId).then((supported) => {
@@ -766,7 +768,7 @@ export class ENS {
     _getEns(): Promise<EnsContract> {
         if (!this._ens) {
             this._ens = this.provider.getNetwork().then((network) => {
-                let ens: any = new Contract(network.ensAddress, interfaces.ens, this.provider);
+                let ens: any = new ethers.Contract(network.ensAddress, interfaces.ens, this.provider);
                 return (<EnsContract>ens);
             });
         }
@@ -791,7 +793,7 @@ export class ENS {
         if (!this._hashRegistrar) {
             this._hashRegistrar = this._getEns().then((ens) => {
                 return ens.owner(utils.namehash(tld)).then((owner) => {
-                    let hashRegistrar: any = new Contract(owner, interfaces.hashRegistrar, this.provider);
+                    let hashRegistrar: any = new ethers.Contract(owner, interfaces.hashRegistrar, this.provider);
                     return (<HashRegistrarContract>hashRegistrar);
                 });
             });

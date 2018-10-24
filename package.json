@@ -1,13 +1,15 @@
 {
   "name": "ethers-ens",
-  "version": "0.3.0-beta.0",
-  "description": "Library and command-line interface for Ethereum ENS.",
-  "main": "index.js",
+  "version": "1.0.0-beta.0",
+  "description": "Library for Ethereum ENS using ethers.js.",
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "bin": {
-    "ethers-ens": "./bin/ethers-ens.js"
+    "build": "tsc -p ./tsconfig.json",
+    "auto-build": "npm run build -- -w",
+    "dist": "gulp default",
+    "dist2": "npm run build && gulp default minified",
+    "test": "mocha tests/test-ens.js"
   },
   "keywords": [
     "ethereum",
@@ -15,9 +17,17 @@
     "namehash"
   ],
   "dependencies": {
-    "ethers": "^2.2.0",
-    "ethers-cli": "1.0.2",
-    "readline-sync": "1.4.4"
+    "ethers": "^4.0.0"
+  },
+  "devDependencies": {
+    "browserify": "^16.2.2",
+    "gulp": "^4.0.0",
+    "gulp-cli": "^2.0.1",
+    "gulp-sourcemaps": "^2.6.4",
+    "gulp-uglify": "^3.0.0",
+    "mocha": "^5.2.0",
+    "typescript": "^2.9.0",
+    "vinyl-source-stream": "^2.0.0"
   },
   "author": "Richard Moore <me@ricmoo.com>",
   "bugs": {
