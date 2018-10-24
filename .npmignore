@@ -1,0 +1,9 @@
+# This is only needed for building dist and library files
+gulpfile.js
+
+# We do not need the TypeScipt source in deployments
+tsconfig.json
+src.ts/
+
+# To run tests, checkout GitHub
+tests/
