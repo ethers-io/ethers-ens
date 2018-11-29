@@ -6,6 +6,125 @@ const errors = ethers.errors;
 const constants = ethers.constants;
 const utils = ethers.utils;
 
+const basex = function(ALPHABET: string) {
+  /**
+   * Contributors:
+   *
+   * base-x encoding
+   * Forked from https://github.com/cryptocoinjs/bs58
+   * Originally written by Mike Hearn for BitcoinJ
+   * Copyright (c) 2011 Google Inc
+   * Ported to JavaScript by Stefan Thomas
+   * Merged Buffer refactorings from base58-native by Stephen Pair
+    * Copyright (c) 2013 BitPay Inc
+   *
+   * The MIT License (MIT)
+   *
+   * Copyright base-x contributors (c) 2016
+   *
+   * Permission is hereby granted, free of charge, to any person obtaining a
+   * copy of this software and associated documentation files (the "Software"),
+   * to deal in the Software without restriction, including without limitation
+   * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+   * and/or sell copies of the Software, and to permit persons to whom the
+   * Software is furnished to do so, subject to the following conditions:
+   *
+   * The above copyright notice and this permission notice shall be included in
+   * all copies or substantial portions of the Software.
+   *
+   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   * IN THE SOFTWARE.
+   *
+   */
+
+  let ALPHABET_MAP: { [character: string ]: number } = {}
+  let BASE = ALPHABET.length
+  let LEADER = ALPHABET.charAt(0)
+
+  // pre-compute lookup table
+  for (let i = 0; i < ALPHABET.length; i++) {
+    ALPHABET_MAP[ALPHABET.charAt(i)] = i;
+  }
+
+  function encode(source: Uint8Array): string {
+    if (source.length === 0) return ''
+
+    let digits = [0]
+    for (let i = 0; i < source.length; ++i) {
+      let carry = source[i];
+      for (let j = 0; j < digits.length; ++j) {
+        carry += digits[j] << 8
+        digits[j] = carry % BASE
+        carry = (carry / BASE) | 0
+      }
+
+      while (carry > 0) {
+        digits.push(carry % BASE)
+        carry = (carry / BASE) | 0
+      }
+    }
+
+    let string = ''
+
+    // deal with leading zeros
+    for (let k = 0; source[k] === 0 && k < source.length - 1; ++k) string += LEADER
+
+    // convert digits to a string
+    for (let q = digits.length - 1; q >= 0; --q) string += ALPHABET[digits[q]]
+
+    return string
+  }
+
+  function decodeUnsafe (string: string): Uint8Array {
+    if (typeof string !== 'string') throw new TypeError('Expected String')
+    let bytes: Array<number> = [];
+    if (string.length === 0) { return new Uint8Array(bytes); }
+
+    bytes.push(0);
+    for (let i = 0; i < string.length; i++) {
+      let value = ALPHABET_MAP[string[i]]
+      if (value === undefined) return
+
+      let carry = value;
+      for (let j = 0; j < bytes.length; ++j) {
+        carry += bytes[j] * BASE
+        bytes[j] = carry & 0xff
+        carry >>= 8
+      }
+
+      while (carry > 0) {
+        bytes.push(carry & 0xff)
+        carry >>= 8
+      }
+    }
+
+    // deal with leading zeros
+    for (let k = 0; string[k] === LEADER && k < string.length - 1; ++k) {
+      bytes.push(0)
+    }
+
+    return new Uint8Array(bytes.reverse())
+  }
+
+  function decode (string: string): Uint8Array {
+    let buffer = decodeUnsafe(string)
+    if (buffer) return buffer
+    throw new Error('Non-base' + BASE + ' character')
+  }
+
+  return {
+    encode: encode,
+    decode: decode
+  }
+}
+const Base58 = basex("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
+
+
 const ensInterface = [
     "function owner(bytes32 nodeHash) constant returns (address owner)",
     "function resolver(bytes32 nodeHash) constant returns (address resolver)",
@@ -56,12 +175,17 @@ const resolverInterface = [
     "function ABI(bytes32 nodeHash, uint256 type) constant returns (uint contentType, bytes data)",
     "function pubkey(bytes32 nodeHash) constant returns (bytes32 x, bytes32 y)",
     "function text(bytes32 nodeHash, string key) constant returns (string value)",
+    "function contenthash(bytes32 nodeHash) constant returns (bytes contenthash)",
+    "function content(bytes32 nodeHash) constant returns (bytes32 content)",
+    "function multihash(bytes32 nodeHash) constant returns (bytes multihash)",
 
     "function setAddr(bytes32 nodeHash, address addr) @150000",
     "function setName(bytes32 nodeHash, string name)",
     "function setABI(bytes32 nodeHash, uint256 contentType, bytes data)",
     "function setPubkey(bytes32 nodeHash, bytes32 x, bytes32 y)",
-    "function setText(bytes32 nodeHash, string key, string value)"
+    "function setText(bytes32 nodeHash, string key, string value)",
+    "function setContenthash(bytes32 nodeHash, bytes contenthash)",
+
 ];
 
 const reverseRegistrarInterface = [
@@ -201,6 +325,10 @@ interface ResolverContract {
 
     ABI(nodeHash: string): Promise<{ type: number, data: Uint8Array }>;
     setABI(nodeHash: string, type: number, data: Uint8Array): Promise<ENSTransactionResponse>;
+
+    contenthash(nodeHash: string): Promise<string>;
+    content(nodeHash: string): Promise<string>;
+    setContenthash(nodeHash: string, contentHash: Uint8Array): Promise<ENSTransactionResponse>;
 }
 
 interface HashRegistrarContract {
@@ -230,11 +358,12 @@ const states = [
 ];
 
 const interfaceIds = {
-    addr:   '0x3b3b57de',
-    name:   '0x691f3431',
-    pubkey: '0xc8690233',
-    text:   '0x59d1d43c',
-    abi:    '0x2203ab56'
+    addr:          '0x3b3b57de',
+    name:          '0x691f3431',
+    pubkey:        '0xc8690233',
+    text:          '0x59d1d43c',
+    abi:           '0x2203ab56',
+    contenthash:   '0xbc1c58d1',
 }
 
 export class ENS {
@@ -744,6 +873,67 @@ export class ENS {
                 return text;
             }, function (error) {
                 return null;
+            });
+        }, function(error) {
+            return null;
+        });
+    }
+
+    setContentHash(name: string, contentHash: string): Promise<ENSTransactionResponse> {
+        if (!this.signer) { return Promise.reject(new Error('missing signer')); }
+
+        let comps = contentHash.split("://");
+        if (comps.length !== 2) { throw new Error("invalid content hash"); }
+
+        let bytes: Uint8Array = null;
+        switch (comps[0]) {
+            case "bzz":
+                bytes = utils.concat([ "0x00", ('0x' + comps[1]) ]);
+                break;
+            case "ipfs":
+                bytes = utils.concat([ "0x01", Base58.decode(comps[1]) ]);
+                break;
+            default:
+                throw new Error('unsupported scheme');
+        }
+
+        let nodeHash = utils.namehash(name);
+
+        return this._getResolver(name, interfaceIds.contenthash).then((resolver) => {
+            return resolver.connect(this.signer).setContenthash(nodeHash, bytes).then((tx) => {
+                tx.metadata = {
+                    name: name,
+                    nodeHash: nodeHash,
+                    resolver: resolver.address,
+                    contentHash: contentHash
+                }
+                return tx;
+            });
+        });
+    }
+
+    getContentHash(name: string, legacy?: boolean): Promise<string> {
+        let nodeHash = utils.namehash(name);
+        return this._getResolver(name).then((resolver) => {
+            return resolver.contenthash(nodeHash).then((contenthash) => {
+                let bytes = utils.arrayify(contenthash);
+                // See: https://github.com/ensdomains/multicodec/blob/master/table.csv
+                switch (bytes[0]) {
+                    case 0x00:
+                        return "bzz://" + utils.hexlify(bytes.slice(1)).substring(2);
+                    case 0x01:
+                        return "ipfs://" + Base58.encode(bytes.slice(1));
+                    default:
+                        break;
+                }
+                throw new Error('unsupported contenthash type - ' + bytes[0]);
+            }, (error) => {
+                if (!legacy) { return null; }
+                return resolver.content(nodeHash).then((content) => {
+                    return "bzz://" + content.substring(2);
+                }, (error) => {
+                    return null;
+                });
             });
         }, function(error) {
             return null;

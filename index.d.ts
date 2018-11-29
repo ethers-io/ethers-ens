@@ -67,6 +67,9 @@ interface ResolverContract {
         data: Uint8Array;
     }>;
     setABI(nodeHash: string, type: number, data: Uint8Array): Promise<ENSTransactionResponse>;
+    contenthash(nodeHash: string): Promise<string>;
+    content(nodeHash: string): Promise<string>;
+    setContenthash(nodeHash: string, contentHash: Uint8Array): Promise<ENSTransactionResponse>;
 }
 interface HashRegistrarContract {
     address: string;
@@ -118,6 +121,8 @@ export declare class ENS {
     getPublicKey(name: string, compressed?: boolean): Promise<string>;
     setText(name: string, key: string, value: string): Promise<ENSTransactionResponse>;
     getText(name: string, key: string): Promise<string>;
+    setContentHash(name: string, contentHash: string): Promise<ENSTransactionResponse>;
+    getContentHash(name: string, legacy?: boolean): Promise<string>;
     _getResolver(name: string, interfaceId?: string): Promise<ResolverContract>;
     _getEns(): Promise<EnsContract>;
     _getHashRegistrar(name: string): Promise<{

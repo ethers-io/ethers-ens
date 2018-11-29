@@ -39,6 +39,114 @@ var ethers_1 = require("ethers");
 var errors = ethers_1.ethers.errors;
 var constants = ethers_1.ethers.constants;
 var utils = ethers_1.ethers.utils;
+var basex = function (ALPHABET) {
+    /**
+     * Contributors:
+     *
+     * base-x encoding
+     * Forked from https://github.com/cryptocoinjs/bs58
+     * Originally written by Mike Hearn for BitcoinJ
+     * Copyright (c) 2011 Google Inc
+     * Ported to JavaScript by Stefan Thomas
+     * Merged Buffer refactorings from base58-native by Stephen Pair
+      * Copyright (c) 2013 BitPay Inc
+     *
+     * The MIT License (MIT)
+     *
+     * Copyright base-x contributors (c) 2016
+     *
+     * Permission is hereby granted, free of charge, to any person obtaining a
+     * copy of this software and associated documentation files (the "Software"),
+     * to deal in the Software without restriction, including without limitation
+     * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+     * and/or sell copies of the Software, and to permit persons to whom the
+     * Software is furnished to do so, subject to the following conditions:
+     *
+     * The above copyright notice and this permission notice shall be included in
+     * all copies or substantial portions of the Software.
+     *
+     * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+     * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+     * IN THE SOFTWARE.
+     *
+     */
+    var ALPHABET_MAP = {};
+    var BASE = ALPHABET.length;
+    var LEADER = ALPHABET.charAt(0);
+    // pre-compute lookup table
+    for (var i = 0; i < ALPHABET.length; i++) {
+        ALPHABET_MAP[ALPHABET.charAt(i)] = i;
+    }
+    function encode(source) {
+        if (source.length === 0)
+            return '';
+        var digits = [0];
+        for (var i = 0; i < source.length; ++i) {
+            var carry = source[i];
+            for (var j = 0; j < digits.length; ++j) {
+                carry += digits[j] << 8;
+                digits[j] = carry % BASE;
+                carry = (carry / BASE) | 0;
+            }
+            while (carry > 0) {
+                digits.push(carry % BASE);
+                carry = (carry / BASE) | 0;
+            }
+        }
+        var string = '';
+        // deal with leading zeros
+        for (var k = 0; source[k] === 0 && k < source.length - 1; ++k)
+            string += LEADER;
+        // convert digits to a string
+        for (var q = digits.length - 1; q >= 0; --q)
+            string += ALPHABET[digits[q]];
+        return string;
+    }
+    function decodeUnsafe(string) {
+        if (typeof string !== 'string')
+            throw new TypeError('Expected String');
+        var bytes = [];
+        if (string.length === 0) {
+            return new Uint8Array(bytes);
+        }
+        bytes.push(0);
+        for (var i = 0; i < string.length; i++) {
+            var value = ALPHABET_MAP[string[i]];
+            if (value === undefined)
+                return;
+            var carry = value;
+            for (var j = 0; j < bytes.length; ++j) {
+                carry += bytes[j] * BASE;
+                bytes[j] = carry & 0xff;
+                carry >>= 8;
+            }
+            while (carry > 0) {
+                bytes.push(carry & 0xff);
+                carry >>= 8;
+            }
+        }
+        // deal with leading zeros
+        for (var k = 0; string[k] === LEADER && k < string.length - 1; ++k) {
+            bytes.push(0);
+        }
+        return new Uint8Array(bytes.reverse());
+    }
+    function decode(string) {
+        var buffer = decodeUnsafe(string);
+        if (buffer)
+            return buffer;
+        throw new Error('Non-base' + BASE + ' character');
+    }
+    return {
+        encode: encode,
+        decode: decode
+    };
+};
+var Base58 = basex("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz");
 var ensInterface = [
     "function owner(bytes32 nodeHash) constant returns (address owner)",
     "function resolver(bytes32 nodeHash) constant returns (address resolver)",
@@ -80,11 +188,15 @@ var resolverInterface = [
     "function ABI(bytes32 nodeHash, uint256 type) constant returns (uint contentType, bytes data)",
     "function pubkey(bytes32 nodeHash) constant returns (bytes32 x, bytes32 y)",
     "function text(bytes32 nodeHash, string key) constant returns (string value)",
+    "function contenthash(bytes32 nodeHash) constant returns (bytes contenthash)",
+    "function content(bytes32 nodeHash) constant returns (bytes32 content)",
+    "function multihash(bytes32 nodeHash) constant returns (bytes multihash)",
     "function setAddr(bytes32 nodeHash, address addr) @150000",
     "function setName(bytes32 nodeHash, string name)",
     "function setABI(bytes32 nodeHash, uint256 contentType, bytes data)",
     "function setPubkey(bytes32 nodeHash, bytes32 x, bytes32 y)",
-    "function setText(bytes32 nodeHash, string key, string value)"
+    "function setText(bytes32 nodeHash, string key, string value)",
+    "function setContenthash(bytes32 nodeHash, bytes contenthash)",
 ];
 var reverseRegistrarInterface = [
     "function setName(string name) returns (bytes32 node) @150000"
@@ -174,7 +286,8 @@ var interfaceIds = {
     name: '0x691f3431',
     pubkey: '0xc8690233',
     text: '0x59d1d43c',
-    abi: '0x2203ab56'
+    abi: '0x2203ab56',
+    contenthash: '0xbc1c58d1',
 };
 var ENS = /** @class */ (function () {
     function ENS(providerOrSigner) {
@@ -733,6 +846,68 @@ var ENS = /** @class */ (function () {
                 return text;
             }, function (error) {
                 return null;
+            });
+        }, function (error) {
+            return null;
+        });
+    };
+    ENS.prototype.setContentHash = function (name, contentHash) {
+        var _this = this;
+        if (!this.signer) {
+            return Promise.reject(new Error('missing signer'));
+        }
+        var comps = contentHash.split("://");
+        if (comps.length !== 2) {
+            throw new Error("invalid content hash");
+        }
+        var bytes = null;
+        switch (comps[0]) {
+            case "bzz":
+                bytes = utils.concat(["0x00", ('0x' + comps[1])]);
+                break;
+            case "ipfs":
+                bytes = utils.concat(["0x01", Base58.decode(comps[1])]);
+                break;
+            default:
+                throw new Error('unsupported scheme');
+        }
+        var nodeHash = utils.namehash(name);
+        return this._getResolver(name, interfaceIds.contenthash).then(function (resolver) {
+            return resolver.connect(_this.signer).setContenthash(nodeHash, bytes).then(function (tx) {
+                tx.metadata = {
+                    name: name,
+                    nodeHash: nodeHash,
+                    resolver: resolver.address,
+                    contentHash: contentHash
+                };
+                return tx;
+            });
+        });
+    };
+    ENS.prototype.getContentHash = function (name, legacy) {
+        var nodeHash = utils.namehash(name);
+        return this._getResolver(name).then(function (resolver) {
+            return resolver.contenthash(nodeHash).then(function (contenthash) {
+                var bytes = utils.arrayify(contenthash);
+                // See: https://github.com/ensdomains/multicodec/blob/master/table.csv
+                switch (bytes[0]) {
+                    case 0x00:
+                        return "bzz://" + utils.hexlify(bytes.slice(1)).substring(2);
+                    case 0x01:
+                        return "ipfs://" + Base58.encode(bytes.slice(1));
+                    default:
+                        break;
+                }
+                throw new Error('unsupported contenthash type - ' + bytes[0]);
+            }, function (error) {
+                if (!legacy) {
+                    return null;
+                }
+                return resolver.content(nodeHash).then(function (content) {
+                    return "bzz://" + content.substring(2);
+                }, function (error) {
+                    return null;
+                });
             });
         }, function (error) {
             return null;
